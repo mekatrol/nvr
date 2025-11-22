@@ -67,6 +67,16 @@ class CameraRecorder(threading.Thread):
     def run(self):
         cam_name = self.cam_conf["name"]
 
+        # Strings to look for in ffmpeg output that indicate an auth problem
+        auth_error_markers = [
+            "401 unauthorized",
+            "403 forbidden",
+            "authorization failed",
+            "auth failed",
+            "unauthorized",  # generic, keep lowercase check
+            "authentication failed",
+        ]
+
         while not self.stop_event.is_set():
             cmd, rtsp_url = self.build_ffmpeg_command()
 
@@ -82,6 +92,9 @@ class CameraRecorder(threading.Thread):
                 time.sleep(10)
                 continue
 
+            # Reset per-run state
+            auth_error_detected = False
+
             try:
                 # Build a sanitised command string for logging
                 safe_cmd = []
@@ -91,7 +104,9 @@ class CameraRecorder(threading.Thread):
                     else:
                         safe_cmd.append(str(part))
 
-                self.logger.log(f"[{cam_name}] Starting ffmpeg: {' '.join(safe_cmd)}")
+                self.logger.log(
+                    f"[{cam_name}] Starting ffmpeg: {' '.join(safe_cmd)}"
+                )
 
                 # Start ffmpeg, capturing its stdout+stderr
                 self.proc = subprocess.Popen(
@@ -110,21 +125,43 @@ class CameraRecorder(threading.Thread):
                     for line in self.proc.stdout:
                         if line is None:
                             break
-                        safe_line = self.logger.sanitize_rtsp_url(line.rstrip("\n"))
+
+                        raw_line = line.rstrip("\n")
+                        safe_line = self.logger.sanitize_rtsp_url(raw_line)
                         log_file.write(safe_line + "\n")
+
+                        # Detect auth errors in ffmpeg output (case-insensitive)
+                        lower = raw_line.lower()
+                        if any(marker in lower for marker in auth_error_markers):
+                            auth_error_detected = True
 
                         if self.stop_event.is_set():
                             break
 
                 # Wait for process to exit (in case stdout loop ended early)
                 ret = self.proc.wait()
-                self.logger.log(f"[{cam_name}] ffmpeg exited with code {ret}")
+                self.logger.log(
+                    f"[{cam_name}] ffmpeg exited with code {ret} "
+                    f"(auth_error_detected={auth_error_detected})"
+                )
 
             except Exception as e:
                 self.logger.log(f"[{cam_name}] Error starting ffmpeg: {repr(e)}")
+                # In this case we don't know if it's auth-related, so we fall through
+                # to the normal retry logic unless stop_event is set.
 
+            # Stop requested: leave the loop
             if self.stop_event.is_set():
                 break
 
+            # If we saw an authorization error, do NOT retry.
+            if auth_error_detected:
+                self.logger.log(
+                    f"[{cam_name}] Authorization error detected; "
+                    f"will not retry connecting to this camera."
+                )
+                break
+
+            # Otherwise, normal retry behavior
             self.logger.log(f"[{cam_name}] Restarting ffmpeg in 5s...")
             time.sleep(5)
