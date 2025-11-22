@@ -10,6 +10,17 @@ from utils.singleton import Singleton
 
 
 class Config(Singleton, MutableMapping):
+    # Config key constants
+    KEY_STORAGE_ROOT: str = "storage_root"
+    KEY_LOG_PATH: str = "log_path"
+    KEY_SEGMENT_SECONDS: str = "segment_seconds"
+    KEY_RETENTION_DAYS: str = "retention_days"
+    KEY_FFMPEG_BINARY: str = "ffmpeg_binary"
+    KEY_CAMERAS: str = "cameras"
+    KEY_CAMERA_ID: str = "id"
+    KEY_CAMERA_NAME: str = "name"
+    KEY_CAMERA_RTSP_URL: str = "rtsp_url"
+
     _conf: Dict[str, Any] = {}
     cameras_by_id: Dict[str, Dict[str, Any]]
 
@@ -32,13 +43,17 @@ class Config(Singleton, MutableMapping):
 
         # Build camera lookup and expand RTSP URLs
         self.cameras_by_id = {}
-        for camera in self._conf.get("cameras", []):
-            if isinstance(camera, dict) and "id" in camera:
-                camera_id: str = camera["id"]
+        for camera in self._conf.get(self.KEY_CAMERAS, []):
+            if isinstance(camera, dict) and self.KEY_CAMERA_ID in camera:
+                camera_id: str = camera[self.KEY_CAMERA_ID]
 
                 # Expand environment variables inside rtsp_url
-                if "rtsp_url" in camera and isinstance(camera["rtsp_url"], str):
-                    camera["rtsp_url"] = Config._expand_env_in_url(camera["rtsp_url"])
+                if self.KEY_CAMERA_RTSP_URL in camera and isinstance(
+                    camera[self.KEY_CAMERA_RTSP_URL], str
+                ):
+                    camera[self.KEY_CAMERA_RTSP_URL] = Config._expand_env_in_url(
+                        camera[self.KEY_CAMERA_RTSP_URL]
+                    )
 
                 self.cameras_by_id[camera_id] = camera
 
@@ -109,7 +124,7 @@ class Config(Singleton, MutableMapping):
         errors: List[str] = []
 
         # storage_root is set and a valid path
-        storage_root: Any = self._conf.get("storage_root")
+        storage_root: Any = self._conf.get(self.KEY_STORAGE_ROOT)
         if not isinstance(storage_root, str) or not storage_root:
             errors.append("storage_root must be a non-empty string")
         else:
@@ -122,7 +137,7 @@ class Config(Singleton, MutableMapping):
                 )
 
         # log_path is set and a valid path
-        log_path: Any = self._conf.get("log_path")
+        log_path: Any = self._conf.get(self.KEY_LOG_PATH)
         if not isinstance(log_path, str) or not log_path:
             errors.append("log_path must be a non-empty string")
         else:
@@ -135,22 +150,22 @@ class Config(Singleton, MutableMapping):
                 )
 
         # retention_days is valid integer
-        retention_days: Any = self._conf.get("retention_days")
+        retention_days: Any = self._conf.get(self.KEY_RETENTION_DAYS)
         if not isinstance(retention_days, int):
             errors.append("retention_days must be an integer")
 
         # segment_seconds is valid integer
-        segment_seconds: Any = self._conf.get("segment_seconds")
+        segment_seconds: Any = self._conf.get(self.KEY_SEGMENT_SECONDS)
         if not isinstance(segment_seconds, int):
             errors.append("segment_seconds must be an integer")
 
         # ffmpeg_binary is set
-        ffmpeg_binary: Any = self._conf.get("ffmpeg_binary")
+        ffmpeg_binary: Any = self._conf.get(self.KEY_FFMPEG_BINARY)
         if not isinstance(ffmpeg_binary, str) or not ffmpeg_binary.strip():
             errors.append("ffmpeg_binary must be a non-empty string")
 
         # cameras validation
-        cameras: Any = self._conf.get("cameras", [])
+        cameras: Any = self._conf.get(self.KEY_CAMERAS, [])
         if not isinstance(cameras, list):
             errors.append("cameras must be a list")
         else:
@@ -162,7 +177,7 @@ class Config(Singleton, MutableMapping):
                     errors.append(f"camera entry at index {index} must be a mapping")
                     continue
 
-                camera_id: Any = cam.get("id")
+                camera_id: Any = cam.get(self.KEY_CAMERA_ID)
                 if not isinstance(camera_id, str) or not camera_id:
                     errors.append(f"camera at index {index} must have a non-empty 'id'")
                 elif camera_id in ids:
@@ -170,7 +185,7 @@ class Config(Singleton, MutableMapping):
                 else:
                     ids.add(camera_id)
 
-                camera_name: Any = cam.get("name")
+                camera_name: Any = cam.get(self.KEY_CAMERA_NAME)
                 if not isinstance(camera_name, str) or not camera_name:
                     errors.append(
                         f"camera '{camera_id or index}' must have a non-empty 'name'"
@@ -180,7 +195,7 @@ class Config(Singleton, MutableMapping):
                 else:
                     names.add(camera_name)
 
-                rtsp_url_val: Any = cam.get("rtsp_url")
+                rtsp_url_val: Any = cam.get(self.KEY_CAMERA_RTSP_URL)
                 if not isinstance(rtsp_url_val, str) or not rtsp_url_val:
                     errors.append(
                         f"camera '{camera_id or index}' must have a non-empty 'rtsp_url'"
