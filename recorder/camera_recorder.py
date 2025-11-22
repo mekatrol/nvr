@@ -3,15 +3,15 @@ import subprocess
 import threading
 import time
 
-from utils.config import expand_env_in_url
+from utils.config import Config
 from logging.logger import Logger
 
 
 class CameraRecorder(threading.Thread):
-    def __init__(self, cam_conf, global_conf):
+    def __init__(self, id: str):
         super().__init__(daemon=True)
-        self.cam_conf = cam_conf
-        self.global_conf = global_conf
+        self.global_conf = Config()
+        self.camera_conf = self.global_conf.get_camera(id)
         self.stop_event = threading.Event()
         self.proc = None
         self.logger = Logger()
@@ -19,11 +19,11 @@ class CameraRecorder(threading.Thread):
         # Per-camera ffmpeg log file
         self.log_dir = Path(self.global_conf.get("log_path", "./logs"))
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.ffmpeg_log_path = self.log_dir / f"{self.cam_conf['name']}.ffmpeg.log"
+        self.ffmpeg_log_path = self.log_dir / f"{self.camera_conf['name']}.ffmpeg.log"
 
     def build_ffmpeg_command(self):
         storage_root = Path(self.global_conf["storage_root"])
-        cam_name = self.cam_conf["name"]
+        cam_name = self.camera_conf["name"]
         segment_seconds = int(self.global_conf.get("segment_seconds", 300))
         ffmpeg_bin = self.global_conf.get("ffmpeg_binary", "ffmpeg")
 
@@ -33,7 +33,7 @@ class CameraRecorder(threading.Thread):
         # e.g. 20251122_203000_300s.mp4
         out_pattern = str(out_dir / f"%Y%m%d_%H%M%S_{segment_seconds}s.mp4")
 
-        rtsp_url = expand_env_in_url(self.cam_conf["rtsp_url"])
+        rtsp_url = self.camera_conf["rtsp_url"]
 
         cmd = [
             ffmpeg_bin,
@@ -54,6 +54,7 @@ class CameraRecorder(threading.Thread):
             "1",
             out_pattern,
         ]
+
         return cmd, rtsp_url
 
     def stop(self):
@@ -65,7 +66,13 @@ class CameraRecorder(threading.Thread):
                 pass
 
     def run(self):
-        cam_name = self.cam_conf["name"]
+        camera_name = self.camera_conf["name"]
+
+        # Only start if enabled
+        if not self.camera_conf.get("enabled", True):
+            self.logger.log(
+                f"Skipping started recorder for camera: {camera_name} as it is disabled"
+            )
 
         # Strings to look for in ffmpeg output that indicate an auth problem
         auth_error_markers = [
@@ -87,7 +94,7 @@ class CameraRecorder(threading.Thread):
                 or "{RTSP_PASSWORD}" in rtsp_url
             ):
                 self.logger.log(
-                    f"[{cam_name}] Invalid RTSP URL after env expansion: {rtsp_url!r}"
+                    f"[{camera_name}] Invalid RTSP URL after env expansion: {rtsp_url!r}"
                 )
                 time.sleep(10)
                 continue
@@ -105,7 +112,7 @@ class CameraRecorder(threading.Thread):
                         safe_cmd.append(str(part))
 
                 self.logger.log(
-                    f"[{cam_name}] Starting ffmpeg: {' '.join(safe_cmd)}"
+                    f"[{camera_name}] Starting ffmpeg: {' '.join(safe_cmd)}"
                 )
 
                 # Start ffmpeg, capturing its stdout+stderr
@@ -141,12 +148,14 @@ class CameraRecorder(threading.Thread):
                 # Wait for process to exit (in case stdout loop ended early)
                 ret = self.proc.wait()
                 self.logger.log(
-                    f"[{cam_name}] ffmpeg exited with code {ret} "
+                    f"[{camera_name}] ffmpeg exited with code {ret} "
                     f"(auth_error_detected={auth_error_detected})"
                 )
 
+                self.logger.log(f"Started recorder for camera: {camera_name}")
+
             except Exception as e:
-                self.logger.log(f"[{cam_name}] Error starting ffmpeg: {repr(e)}")
+                self.logger.log(f"[{camera_name}] Error starting ffmpeg: {repr(e)}")
                 # In this case we don't know if it's auth-related, so we fall through
                 # to the normal retry logic unless stop_event is set.
 
@@ -157,11 +166,11 @@ class CameraRecorder(threading.Thread):
             # If we saw an authorization error, do NOT retry.
             if auth_error_detected:
                 self.logger.log(
-                    f"[{cam_name}] Authorization error detected; "
+                    f"[{camera_name}] Authorization error detected; "
                     f"will not retry connecting to this camera."
                 )
                 break
 
             # Otherwise, normal retry behavior
-            self.logger.log(f"[{cam_name}] Restarting ffmpeg in 5s...")
+            self.logger.log(f"[{camera_name}] Restarting ffmpeg in 5s...")
             time.sleep(5)

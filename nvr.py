@@ -1,4 +1,3 @@
-import os
 import signal
 import threading
 import time
@@ -7,53 +6,40 @@ from pathlib import Path
 from logging.logger import Logger
 from recorder.camera_recorder import CameraRecorder
 from recorder.retention_manager import RetentionManager
-from utils.config import load_config, merge_dicts
+from utils.config import Config
 
 
 def main() -> None:
-    # Create logger singleton instance
+    # Create singleton instances
     logger = Logger()
-
-    # Base config (usually config.yaml, or whatever NVR_CONFIG points to)
-    config_path = os.environ.get("NVR_CONFIG", "config.yaml")
-    conf = load_config(config_path)
-
-    # Local-only overrides: config.debug.yaml in the same directory as config.yaml
-    base_path = Path(config_path)
-    debug_config_path = base_path.with_name("config.debug.yaml")
-
-    # If there there is a debug conf then merge configured values
-    if debug_config_path.exists():
-        debug_conf = load_config(str(debug_config_path))
-        if debug_conf:
-            conf = merge_dicts(conf, debug_conf)
+    conf = Config()
 
     # Now initialise from configuration settings
-    logger.init_from_config(conf)
+    logger.init_from_config()
 
-    storage_root = Path(conf["storage_root"])
+    storage_root = Path(conf._conf["storage_root"])
     storage_root.mkdir(parents=True, exist_ok=True)
 
     # Main application log file
-    logger.log(f"NVR starting with config: {config_path}")
+    logger.log(f"NVR starting with config: {conf.config_path}")
 
-    cameras = conf.get("cameras", [])
+    cameras = conf.get("cameras") or []
     recorders = []
 
     # Start one CameraRecorder thread per enabled camera
-    for cam in cameras:
-        if not cam.get("enabled", True):
-            logger.log(f"Camera disabled, skipping: {cam.get('name', cam.get('id'))}")
-            continue
-        rec = CameraRecorder(cam, conf)
+    for camera in cameras:
+        # Create a recorder
+        rec = CameraRecorder(camera["id"])
+
+        # Start it
         rec.start()
+
+        # Add to recorders
         recorders.append(rec)
-        logger.log(f"Started recorder for camera: {cam['name']}")
 
     # Start retention manager
-    retention_manager = RetentionManager(conf)
+    retention_manager = RetentionManager()
     retention_manager.start()
-    logger.log("Retention manager started")
 
     # Handle signals for clean shutdown
     stop_event = threading.Event()

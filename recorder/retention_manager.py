@@ -4,12 +4,13 @@ import threading
 import time
 
 from logging.logger import Logger
+from utils.config import Config
 
 
 class RetentionManager(threading.Thread):
-    def __init__(self, global_conf):
+    def __init__(self):
         super().__init__(daemon=True)
-        self.global_conf = global_conf
+        self.conf = Config()
         self.stop_event = threading.Event()
         self.logger = Logger()
 
@@ -17,9 +18,11 @@ class RetentionManager(threading.Thread):
         self.stop_event.set()
 
     def run(self) -> None:
-        retention_days = int(self.global_conf.get("retention_days", 7))
-        storage_root = Path(self.global_conf["storage_root"])
+        retention_days = int(self.conf.get("retention_days", 7))
+        storage_root = Path(self.conf["storage_root"])
         check_interval_seconds = 600  # every 10 minutes
+
+        self.logger.log("Retention manager started")
 
         while not self.stop_event.is_set():
             cutoff = datetime.now() - timedelta(days=retention_days)

@@ -2,19 +2,11 @@ from datetime import datetime
 from pathlib import Path
 import re
 import threading
+from utils.config import Config
+from utils.singleton import Singleton
 
 
-class Logger:
-    _instance = None
-    _instance_lock = threading.Lock()
-
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            with cls._instance_lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-
+class Logger(Singleton):
     def __init__(self):
         # __init__ may run multiple times in a naive singleton,
         # so protect against reinitializing.
@@ -26,7 +18,8 @@ class Logger:
         self.log_lock = threading.Lock()
         self._initialized = True
 
-    def init_from_config(self, conf: dict) -> None:
+    def init_from_config(self) -> None:
+        conf = Config()
         self.log_dir = Path(conf["log_path"])
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.log_file_path = self.log_dir / "nvr.log"
