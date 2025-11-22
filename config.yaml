@@ -1,9 +1,14 @@
-storage_root: ../../nvr/streams
+# Where logs are stored
 log_path: ../../nvr/logs
-segment_seconds: 300 # 5 minutes per file
-retention_days: 7 # delete files older than this
 
+# Location of ffmpeg binary
 ffmpeg_binary: ffmpeg # or full path: /usr/bin/ffmpeg
+
+# Stream settings
+stream:
+  output_path: ../../nvr/streams
+  segment_seconds: 300 # 5 minutes per file
+  retention_days: 7 # delete files older than this
 
 cameras:
   - id: driveway

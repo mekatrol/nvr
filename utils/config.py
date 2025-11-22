@@ -11,10 +11,11 @@ from utils.singleton import Singleton
 
 class Config(Singleton, MutableMapping):
     # Config key constants
-    KEY_STORAGE_ROOT: str = "storage_root"
     KEY_LOG_PATH: str = "log_path"
-    KEY_SEGMENT_SECONDS: str = "segment_seconds"
-    KEY_RETENTION_DAYS: str = "retention_days"
+    KEY_STREAM: str = "stream"
+    KEY_STREAM_OUTPUT_PATH: str = "output_path"
+    KEY_STREAM_SEGMENT_SECONDS: str = "segment_seconds"
+    KEY_STREAM_RETENTION_DAYS: str = "retention_days"
     KEY_FFMPEG_BINARY: str = "ffmpeg_binary"
     KEY_CAMERAS: str = "cameras"
     KEY_CAMERA_ID: str = "id"
@@ -123,41 +124,47 @@ class Config(Singleton, MutableMapping):
     def _validate(self) -> None:
         errors: List[str] = []
 
-        # storage_root is set and a valid path
-        storage_root: Any = self._conf.get(self.KEY_STORAGE_ROOT)
-        if not isinstance(storage_root, str) or not storage_root:
-            errors.append("storage_root must be a non-empty string")
-        else:
-            sr_path = Path(storage_root)
-            if not sr_path.is_absolute():
-                sr_path = (Path(self.config_path).parent / sr_path).resolve()
-            if not sr_path.exists() or not sr_path.is_dir():
-                errors.append(
-                    f"storage_root path does not exist or is not a directory: {sr_path}"
-                )
-
         # log_path is set and a valid path
         log_path: Any = self._conf.get(self.KEY_LOG_PATH)
         if not isinstance(log_path, str) or not log_path:
-            errors.append("log_path must be a non-empty string")
+            errors.append("stream->log_path must be a non-empty string")
         else:
-            lp_path = Path(log_path)
-            if not lp_path.is_absolute():
-                lp_path = (Path(self.config_path).parent / lp_path).resolve()
-            if not lp_path.exists() or not lp_path.is_dir():
+            path = Path(log_path)
+            if not path.is_absolute():
+                path = (Path(self.config_path).parent / path).resolve()
+            if not path.exists() or not path.is_dir():
                 errors.append(
-                    f"log_path path does not exist or is not a directory: {lp_path}"
+                    f"stream->log_path path does not exist or is not a directory: {path}"
                 )
 
-        # retention_days is valid integer
-        retention_days: Any = self._conf.get(self.KEY_RETENTION_DAYS)
-        if not isinstance(retention_days, int):
-            errors.append("retention_days must be an integer")
+        stream_cfg = self._conf.get(self.KEY_STREAM)
+        if not isinstance(stream_cfg, dict):
+            errors.append("stream must be a dictionary value")
+        else:
+            # stream output path is set and a valid path
+            stream_output_path: Any = stream_cfg.get(self.KEY_STREAM_OUTPUT_PATH)
+            if not isinstance(stream_output_path, str) or not stream_output_path:
+                errors.append("stream->output_path must be a non-empty string")
+            else:
+                path = Path(stream_output_path)
+                if not path.is_absolute():
+                    path = (Path(self.config_path).parent / path).resolve()
+                if not path.exists() or not path.is_dir():
+                    errors.append(
+                        f"stream->output_path does not exist or is not a directory: {path}"
+                    )
 
-        # segment_seconds is valid integer
-        segment_seconds: Any = self._conf.get(self.KEY_SEGMENT_SECONDS)
-        if not isinstance(segment_seconds, int):
-            errors.append("segment_seconds must be an integer")
+            # retention_days is valid integer
+            stream_retention_days: Any = stream_cfg.get(self.KEY_STREAM_RETENTION_DAYS)
+            if not isinstance(stream_retention_days, int):
+                errors.append("stream->retention_days must be an integer")
+
+            # segment_seconds is valid integer
+            stream_segment_seconds: Any = stream_cfg.get(
+                self.KEY_STREAM_SEGMENT_SECONDS
+            )
+            if not isinstance(stream_segment_seconds, int):
+                errors.append("stream->segment_seconds must be an integer")
 
         # ffmpeg_binary is set
         ffmpeg_binary: Any = self._conf.get(self.KEY_FFMPEG_BINARY)
