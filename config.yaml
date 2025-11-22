@@ -1,0 +1,22 @@
+storage_root: ../../nvr/streams
+log_path: ../../nvr/logs
+segment_seconds: 300 # 5 minutes per file
+retention_days: 7 # delete files older than this
+
+ffmpeg_binary: ffmpeg # or full path: /usr/bin/ffmpeg
+
+cameras:
+  - id: driveway
+    name: driveway
+    enabled: true
+    rtsp_url: rtsp://{RTSP_USER}:{RTSP_PASSWORD}@camera-driveway.lan/Streaming/Channels/101/
+
+  - id: garage
+    name: garage
+    enabled: true
+    rtsp_url: rtsp://{RTSP_USER}:{RTSP_PASSWORD}@camera-garage.lan/Streaming/Channels/101/
+
+  - id: front_yard
+    name: front_yard
+    enabled: true
+    rtsp_url: rtsp://{RTSP_USER}:{RTSP_PASSWORD}@camera-front-right.lan/Streaming/Channels/101/
