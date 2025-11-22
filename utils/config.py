@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
 from collections.abc import MutableMapping
-from typing import Any, Dict
+from typing import Any, Dict, Iterator, List, Set
+from urllib.parse import urlparse
 
 import yaml
 
@@ -10,6 +11,7 @@ from utils.singleton import Singleton
 
 class Config(Singleton, MutableMapping):
     _conf: Dict[str, Any] = {}
+    cameras_by_id: Dict[str, Dict[str, Any]]
 
     def __init__(self) -> None:
         # Base config (usually config.yaml, or whatever NVR_CONFIG env variable points to)
@@ -28,16 +30,20 @@ class Config(Singleton, MutableMapping):
             if debug_conf:
                 self._conf = self._merge_dicts(self._conf, debug_conf)
 
+        # Build camera lookup and expand RTSP URLs
         self.cameras_by_id = {}
         for camera in self._conf.get("cameras", []):
             if isinstance(camera, dict) and "id" in camera:
-                cam_id = camera["id"]
+                camera_id: str = camera["id"]
 
                 # Expand environment variables inside rtsp_url
-                if "rtsp_url" in camera:
+                if "rtsp_url" in camera and isinstance(camera["rtsp_url"], str):
                     camera["rtsp_url"] = Config._expand_env_in_url(camera["rtsp_url"])
 
-                self.cameras_by_id[cam_id] = camera
+                self.cameras_by_id[camera_id] = camera
+
+        # Validate the loaded configuration
+        self._validate()
 
     def get_camera(self, camera_id: str) -> Dict[str, Any]:
         return self.cameras_by_id[camera_id]
@@ -51,7 +57,7 @@ class Config(Singleton, MutableMapping):
     def __delitem__(self, key: str) -> None:
         del self._conf[key]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._conf)
 
     def __len__(self) -> int:
@@ -98,3 +104,95 @@ class Config(Singleton, MutableMapping):
         with open(path, "r", encoding="utf-8") as f:
             data: Any = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
+
+    def _validate(self) -> None:
+        errors: List[str] = []
+
+        # storage_root is set and a valid path
+        storage_root: Any = self._conf.get("storage_root")
+        if not isinstance(storage_root, str) or not storage_root:
+            errors.append("storage_root must be a non-empty string")
+        else:
+            sr_path = Path(storage_root)
+            if not sr_path.is_absolute():
+                sr_path = (Path(self.config_path).parent / sr_path).resolve()
+            if not sr_path.exists() or not sr_path.is_dir():
+                errors.append(
+                    f"storage_root path does not exist or is not a directory: {sr_path}"
+                )
+
+        # log_path is set and a valid path
+        log_path: Any = self._conf.get("log_path")
+        if not isinstance(log_path, str) or not log_path:
+            errors.append("log_path must be a non-empty string")
+        else:
+            lp_path = Path(log_path)
+            if not lp_path.is_absolute():
+                lp_path = (Path(self.config_path).parent / lp_path).resolve()
+            if not lp_path.exists() or not lp_path.is_dir():
+                errors.append(
+                    f"log_path path does not exist or is not a directory: {lp_path}"
+                )
+
+        # retention_days is valid integer
+        retention_days: Any = self._conf.get("retention_days")
+        if not isinstance(retention_days, int):
+            errors.append("retention_days must be an integer")
+
+        # segment_seconds is valid integer
+        segment_seconds: Any = self._conf.get("segment_seconds")
+        if not isinstance(segment_seconds, int):
+            errors.append("segment_seconds must be an integer")
+
+        # ffmpeg_binary is set
+        ffmpeg_binary: Any = self._conf.get("ffmpeg_binary")
+        if not isinstance(ffmpeg_binary, str) or not ffmpeg_binary.strip():
+            errors.append("ffmpeg_binary must be a non-empty string")
+
+        # cameras validation
+        cameras: Any = self._conf.get("cameras", [])
+        if not isinstance(cameras, list):
+            errors.append("cameras must be a list")
+        else:
+            ids: Set[str] = set()
+            names: Set[str] = set()
+
+            for index, cam in enumerate(cameras):
+                if not isinstance(cam, dict):
+                    errors.append(f"camera entry at index {index} must be a mapping")
+                    continue
+
+                camera_id: Any = cam.get("id")
+                if not isinstance(camera_id, str) or not camera_id:
+                    errors.append(f"camera at index {index} must have a non-empty 'id'")
+                elif camera_id in ids:
+                    errors.append(f"duplicate camera id: {camera_id}")
+                else:
+                    ids.add(camera_id)
+
+                camera_name: Any = cam.get("name")
+                if not isinstance(camera_name, str) or not camera_name:
+                    errors.append(
+                        f"camera '{camera_id or index}' must have a non-empty 'name'"
+                    )
+                elif camera_name in names:
+                    errors.append(f"duplicate camera name: {camera_name}")
+                else:
+                    names.add(camera_name)
+
+                rtsp_url_val: Any = cam.get("rtsp_url")
+                if not isinstance(rtsp_url_val, str) or not rtsp_url_val:
+                    errors.append(
+                        f"camera '{camera_id or index}' must have a non-empty 'rtsp_url'"
+                    )
+                else:
+                    parsed = urlparse(rtsp_url_val)
+                    if parsed.scheme.lower() != "rtsp":
+                        errors.append(
+                            f"camera '{camera_id or index}' has invalid rtsp_url "
+                            f"(scheme must be rtsp): {rtsp_url_val}"
+                        )
+
+        if errors:
+            message = "Invalid configuration:\n- " + "\n- ".join(errors)
+            raise ValueError(message)

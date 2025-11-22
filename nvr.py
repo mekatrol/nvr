@@ -10,12 +10,16 @@ from utils.config import Config
 
 
 def main() -> None:
-    # Create singleton instances
-    logger = Logger()
-    conf = Config()
+    # Create config
+    conf = None
+    try:
+        conf = Config()
+    except Exception as ex:
+        print(ex)
+        return
 
-    # Now initialise from configuration settings
-    logger.init_from_config()
+    # Create logger
+    logger = Logger()
 
     storage_root = Path(conf._conf["storage_root"])
     storage_root.mkdir(parents=True, exist_ok=True)

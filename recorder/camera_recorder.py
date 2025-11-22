@@ -107,7 +107,7 @@ class CameraRecorder(threading.Thread):
                 safe_cmd = []
                 for part in cmd:
                     if isinstance(part, str) and part.startswith("rtsp://"):
-                        safe_cmd.append(self.logger.sanitize_rtsp_url(part))
+                        safe_cmd.append(self.logger._sanitize_rtsp_url(part))
                     else:
                         safe_cmd.append(str(part))
 
@@ -134,7 +134,7 @@ class CameraRecorder(threading.Thread):
                             break
 
                         raw_line = line.rstrip("\n")
-                        safe_line = self.logger.sanitize_rtsp_url(raw_line)
+                        safe_line = self.logger._sanitize_rtsp_url(raw_line)
                         log_file.write(safe_line + "\n")
 
                         # Detect auth errors in ffmpeg output (case-insensitive)
