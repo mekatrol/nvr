@@ -22,12 +22,12 @@ class CameraRecorder(threading.Thread):
         self.ffmpeg_log_path = self.log_dir / f"{self.camera_conf['name']}.ffmpeg.log"
 
     def build_ffmpeg_command(self):
-        storage_root = Path(self.global_conf["storage_root"])
-        cam_name = self.camera_conf["name"]
-        segment_seconds = int(self.global_conf.get("segment_seconds", 300))
+        stream_output_path = Path(self.global_conf.stream_output_path)
+        camera_name = self.camera_conf["name"]
+        segment_seconds = self.global_conf.stream_segment_seconds
         ffmpeg_bin = self.global_conf.get("ffmpeg_binary", "ffmpeg")
 
-        out_dir = storage_root / cam_name
+        out_dir = stream_output_path / camera_name
         out_dir.mkdir(parents=True, exist_ok=True)
 
         # e.g. 20251122_203000_300s.mp4

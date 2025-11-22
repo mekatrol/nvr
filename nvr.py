@@ -21,8 +21,8 @@ def main() -> None:
     # Create logger
     logger = Logger()
 
-    storage_root = Path(conf._conf["storage_root"])
-    storage_root.mkdir(parents=True, exist_ok=True)
+    stream_output_path = Path(conf.stream_output_path)
+    stream_output_path.mkdir(parents=True, exist_ok=True)
 
     # Main application log file
     logger.log(f"NVR starting with config: {conf.config_path}")

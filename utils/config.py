@@ -20,6 +20,10 @@ class Config(Singleton, MutableMapping):
     KEY_CAMERA_NAME: str = "name"
     KEY_CAMERA_RTSP_URL: str = "rtsp_url"
 
+    stream_output_path = None
+    stream_retention_days = 1
+    stream_segment_seconds = 5 * 60  # Five minutes
+
     _conf: Dict[str, Any] = {}
     cameras_by_id: Dict[str, Dict[str, Any]]
 
@@ -119,50 +123,132 @@ class Config(Singleton, MutableMapping):
             data: Any = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
 
+    def _validate_dir_path(
+        self, raw_value: Any, field_label: str, errors: List[str], validate_exists: True
+    ) -> bool:
+        """
+        Validate that raw_value is a non-empty string pointing to an existing directory.
+        field_label is used verbatim in error messages (e.g. 'stream->log_path').
+        """
+        if not isinstance(raw_value, str) or not raw_value:
+            errors.append(f"{field_label} must be a non-empty string")
+            return False
+
+        path = Path(raw_value)
+        if not path.is_absolute():
+            path = (Path(self.config_path).parent / path).resolve()
+
+        if validate_exists and not path.exists():
+            errors.append(f"{field_label} does not exist: {path}")
+            return False
+
+        # Must be a dreictory
+        if path.exists() and not path.is_dir():
+            errors.append(f"{field_label} is not a directory: {path}")
+            return False
+
+        return True
+
+    @staticmethod
+    def _validate_int(
+        raw_value: Any,
+        field_label: str,
+        errors: List[str],
+        min_value: int = None,
+        max_value: int = None,
+    ) -> None:
+        """
+        Validate that raw_value is an integer.
+        field_label is used verbatim in error messages (e.g. 'stream->retention_days').
+        """
+        if not isinstance(raw_value, int):
+            errors.append(f"{field_label} must be an integer")
+            return False  # Can't validate further is not an integer
+
+        has_error = False
+        if min_value is not None and raw_value < min_value:
+            errors.append(f"{field_label} must be greater than or equal to {min_value}")
+            has_error = True
+
+        if max_value is not None and raw_value > max_value:
+            errors.append(f"{field_label} must be less than or equal to {max_value}")
+            has_error = True
+
+        return has_error
+
+    @staticmethod
+    def _validate_float(
+        raw_value: Any,
+        field_label: str,
+        errors: List[str],
+        min_value: float = None,
+        max_value: float = None,
+    ) -> bool:
+        """
+        Validate that raw_value is a numeric value (int or float).
+        field_label is used verbatim in error messages.
+        """
+        if not isinstance(raw_value, (int, float)):
+            errors.append(f"{field_label} must be a number")
+            return False  # do not attempt range checks
+
+        has_error = False
+        if min_value is not None and raw_value < min_value:
+            errors.append(f"{field_label} must be greater than or equal to {min_value}")
+            has_error = True
+
+        if max_value is not None and raw_value > max_value:
+            errors.append(f"{field_label} must be less than or equal to {max_value}")
+            has_error = True
+
+        return has_error
+
     def _validate(self) -> None:
         errors: List[str] = []
 
         # log_path is set and a valid path
         log_path: Any = self._conf.get(self.KEY_LOG_PATH)
-        if not isinstance(log_path, str) or not log_path:
-            errors.append("stream->log_path must be a non-empty string")
-        else:
-            path = Path(log_path)
-            if not path.is_absolute():
-                path = (Path(self.config_path).parent / path).resolve()
-            if not path.exists() or not path.is_dir():
-                errors.append(
-                    f"stream->log_path path does not exist or is not a directory: {path}"
-                )
+        self._validate_dir_path(log_path, "stream->log_path", errors, False)
 
         stream_cfg = self._conf.get(self.KEY_STREAM)
         if not isinstance(stream_cfg, dict):
             errors.append("stream must be a dictionary value")
         else:
+            self.stream_output_path = None
+            self.stream_retention_days = 1
+
             # stream output path is set and a valid path
             stream_output_path: Any = stream_cfg.get(self.KEY_STREAM_OUTPUT_PATH)
-            if not isinstance(stream_output_path, str) or not stream_output_path:
-                errors.append("stream->output_path must be a non-empty string")
-            else:
-                path = Path(stream_output_path)
-                if not path.is_absolute():
-                    path = (Path(self.config_path).parent / path).resolve()
-                if not path.exists() or not path.is_dir():
-                    errors.append(
-                        f"stream->output_path does not exist or is not a directory: {path}"
-                    )
+            if self._validate_dir_path(
+                stream_output_path, "stream->output_path", errors, False
+            ):
+                self.stream_output_path = stream_output_path
 
             # retention_days is valid integer
             stream_retention_days: Any = stream_cfg.get(self.KEY_STREAM_RETENTION_DAYS)
-            if not isinstance(stream_retention_days, int):
-                errors.append("stream->retention_days must be an integer")
+            if self._validate_float(
+                stream_retention_days,
+                "stream->retention_days",
+                errors,
+                0,  # Must be zero or greater
+            ):
+                self.stream_retention_days = stream_retention_days
 
             # segment_seconds is valid integer
             stream_segment_seconds: Any = stream_cfg.get(
                 self.KEY_STREAM_SEGMENT_SECONDS
             )
-            if not isinstance(stream_segment_seconds, int):
-                errors.append("stream->segment_seconds must be an integer")
+
+            # Default to 5 minutes
+            self.stream_segment_seconds = stream_segment_seconds = 5 * 50
+
+            if self._validate_int(
+                stream_segment_seconds,
+                "stream->segment_seconds",
+                errors,
+                1,  # Must be one or greater
+            ):
+                self.stream_segment_seconds = stream_segment_seconds
 
         # ffmpeg_binary is set
         ffmpeg_binary: Any = self._conf.get(self.KEY_FFMPEG_BINARY)

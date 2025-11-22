@@ -18,15 +18,15 @@ class RetentionManager(threading.Thread):
         self.stop_event.set()
 
     def run(self) -> None:
-        retention_days = int(self.conf.get("retention_days", 7))
-        storage_root = Path(self.conf["storage_root"])
+        retention_days = self.conf.stream_retention_days
+        stream_output_path = Path(self.conf.stream_output_path)
         check_interval_seconds = 600  # every 10 minutes
 
         self.logger.log("Retention manager started")
 
         while not self.stop_event.is_set():
             cutoff = datetime.now() - timedelta(days=retention_days)
-            for cam_dir in storage_root.glob("*"):
+            for cam_dir in stream_output_path.glob("*"):
                 if not cam_dir.is_dir():
                     continue
                 for file in cam_dir.glob("*.mp4"):
