@@ -1,11 +1,9 @@
 import os
+import yaml
 from pathlib import Path
 from collections.abc import MutableMapping
 from typing import Any, Dict, Iterator, List, Set
 from urllib.parse import urlparse
-
-import yaml
-
 from utils.singleton import Singleton
 
 
