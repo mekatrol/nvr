@@ -6,7 +6,7 @@ from pathlib import Path
 
 from logging.logger import Logger
 from recorder.camera_recorder import CameraRecorder
-from recorder.retention_cleaner import RetentionCleaner
+from recorder.retention_manager import RetentionManager
 from utils.config import load_config, merge_dicts
 
 
@@ -50,10 +50,10 @@ def main() -> None:
         recorders.append(rec)
         logger.log(f"Started recorder for camera: {cam['name']}")
 
-    # Start retention cleaner
-    cleaner = RetentionCleaner(conf)
-    cleaner.start()
-    logger.log("Retention cleaner started")
+    # Start retention manager
+    retention_manager = RetentionManager(conf)
+    retention_manager.start()
+    logger.log("Retention manager started")
 
     # Handle signals for clean shutdown
     stop_event = threading.Event()
@@ -69,16 +69,16 @@ def main() -> None:
     while not stop_event.is_set():
         time.sleep(1)
 
-    logger.log("Stopping recorders...")
-    cleaner.stop()
+    logger.log("Stopping recorders and retention manager...")
+    retention_manager.stop()
     for rec in recorders:
         rec.stop()
 
-    cleaner.join()
+    retention_manager.join()
     for rec in recorders:
         rec.join()
 
-    logger.log("All recorders stopped")
+    logger.log("All stopped")
 
 
 if __name__ == "__main__":

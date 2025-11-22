@@ -26,7 +26,7 @@ class Logger:
         self.log_lock = threading.Lock()
         self._initialized = True
 
-    def init_from_config(self, conf):
+    def init_from_config(self, conf: dict) -> None:
         self.log_dir = Path(conf["log_path"])
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.log_file_path = self.log_dir / "nvr.log"
@@ -45,7 +45,7 @@ class Logger:
             text,
         )
 
-    def log(self, msg: str):
+    def log(self, msg: str) -> None:
         """
         Write a timestamped log line to the main application log file.
         Falls back to stdout if LOG_FILE_PATH is not set yet.

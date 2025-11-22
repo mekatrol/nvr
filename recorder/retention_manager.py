@@ -6,17 +6,17 @@ import time
 from logging.logger import Logger
 
 
-class RetentionCleaner(threading.Thread):
+class RetentionManager(threading.Thread):
     def __init__(self, global_conf):
         super().__init__(daemon=True)
         self.global_conf = global_conf
         self.stop_event = threading.Event()
         self.logger = Logger()
 
-    def stop(self):
+    def stop(self) -> None:
         self.stop_event.set()
 
-    def run(self):
+    def run(self) -> None:
         retention_days = int(self.global_conf.get("retention_days", 7))
         storage_root = Path(self.global_conf["storage_root"])
         check_interval_seconds = 600  # every 10 minutes
