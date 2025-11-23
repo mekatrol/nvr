@@ -8,7 +8,7 @@ ffmpeg_binary: ffmpeg # or full path: /usr/bin/ffmpeg
 stream:
   segment_seconds: 300 # 5 minutes per file
   output_path: ../../nvr/streams/active
-  retention_days: 7 # delete files older than this
+  retention_days: 0.2 # backup files older than this many days (can be a partial day too)
   backup_retention_days: 20
   backup_output_path: ../../nvr/streams/backup
 

@@ -25,13 +25,73 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Set up NAS mount
+
+```bash
+sudo nano /etc/wsl.conf
+```
+
+## Add to contents
+
+```init
+[automount]
+enabled=true
+
+[filesystem]
+fsTab=true
+```
+
+```bash
+sudo mkdir -p /mnt/nas
+sudo apt install cifs-utils
+```
+
+### Replace following values
+
+> //nas.lan/nas with nas path  
+> /mnt/nas with actual mount name  
+> 'user' in path /home/user with actual user name  
+
+```bash
+sudo nano /etc/fstab
+```
+
+```ini
+//nas.lan/nas /mnt/nas cifs  credentials=/home/user/.smbcredentials,uid=1000,gid=1000,file_mode=0777,dir_mode=0777,vers=3.0,_netdev,nofail  0  0
+```
+
+```bash
+nano ~/.smbcredentials
+```
+
+```ini
+username=user
+password=!MyPassword111
+```
+
+```bash
+chmod 600 ~/.smbcredentials
+```
+
+#### from a PowerShell pront
+
+```powershell
+wsl --shutdown
+```
+
+#### then restart Ubuntu prompt
+
+```bash
+mount | grep nas.lan
+```
+
 ## Create Service
 
 ```bash
 sudo nano /etc/systemd/system/nvr.service
 ```
 
-**Enter contents:**
+### Enter content
 
 ```ini
 [Unit]
