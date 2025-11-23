@@ -1,5 +1,6 @@
 import os
 import yaml
+import logging
 from pathlib import Path
 from collections.abc import MutableMapping
 from typing import Any, Dict, Iterator, List, Set
@@ -69,6 +70,55 @@ class Config(Singleton, MutableMapping):
 
     def get_camera(self, camera_id: str) -> Dict[str, Any]:
         return self.cameras_by_id[camera_id]
+
+    def log_config(self, logger: logging.Logger | None = None) -> None:
+        """
+        Log all effective configuration values.
+
+        Can be called from other modules via:
+            from config import Config
+            Config().log_config()
+        """
+        logger = logger or logging.getLogger(__name__)
+
+        logger.info("Configuration file: %s", self.config_path)
+
+        # Top-level raw config keys
+        logger.info("Raw config keys: %s", ", ".join(sorted(self._conf.keys())))
+
+        # Stream-related effective values
+        logger.info("stream.output_path=%s", self.stream_output_path)
+        logger.info("stream.retention_days=%s", self.stream_retention_days)
+        logger.info("stream.segment_seconds=%s", self.stream_segment_seconds)
+        logger.info("stream.backup_output_path=%s", self.stream_backup_output_path)
+        logger.info(
+            "stream.backup_retention_days=%s", self.stream_backup_retention_days
+        )
+
+        # ffmpeg
+        ffmpeg_binary = self._conf.get(self.KEY_FFMPEG_BINARY)
+        logger.info("ffmpeg_binary=%s", ffmpeg_binary)
+
+        # Cameras (RTSP password redacted)
+        for cam_id, cam in self.cameras_by_id.items():
+            safe_cam = dict(cam)
+
+            url_val = safe_cam.get(self.KEY_CAMERA_RTSP_URL)
+            if isinstance(url_val, str):
+                parsed = urlparse(url_val)
+
+                # Redact password if present
+                if parsed.password is not None:
+                    host = parsed.hostname or ""
+                    netloc = host
+                    if parsed.username:
+                        netloc = f"{parsed.username}:***@{host}"
+                    if parsed.port:
+                        netloc = f"{netloc}:{parsed.port}"
+                    parsed = parsed._replace(netloc=netloc)
+                    safe_cam[self.KEY_CAMERA_RTSP_URL] = parsed.geturl()
+
+            logger.info("camera[%s]=%r", cam_id, safe_cam)
 
     def __getitem__(self, key: str) -> Any:
         return self._conf[key]
@@ -239,14 +289,18 @@ class Config(Singleton, MutableMapping):
                 self.stream_retention_days = stream_retention_days
 
             # stream backup output path is set and a valid path
-            stream_backup_output_path: Any = stream_cfg.get(self.KEY_STREAM_BACKUP_OUTPUT_PATH)
+            stream_backup_output_path: Any = stream_cfg.get(
+                self.KEY_STREAM_BACKUP_OUTPUT_PATH
+            )
             if self._validate_dir_path(
                 stream_backup_output_path, "stream->backup_output_path", errors, False
             ):
                 self.stream_backup_output_path = stream_backup_output_path
 
             # backup_retention_days is valid integer
-            stream_backup_retention_days: Any = stream_cfg.get(self.KEY_STREAM_BACKUP_RETENTION_DAYS)
+            stream_backup_retention_days: Any = stream_cfg.get(
+                self.KEY_STREAM_BACKUP_RETENTION_DAYS
+            )
             if self._validate_float(
                 stream_backup_retention_days,
                 "stream->backup_retention_days",

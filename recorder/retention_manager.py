@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from logging.logger import Logger
+from log.logger import Logger
 from utils.config import Config
 
 
@@ -13,7 +13,7 @@ class RetentionManager(threading.Thread):
         super().__init__(daemon=True)
         self.conf = Config()
         self.stop_event = threading.Event()
-        self.logger = Logger()
+        self.logger = Logger().logger
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -25,7 +25,7 @@ class RetentionManager(threading.Thread):
         backup_path = Path(self.conf.stream_backup_output_path)
         check_interval_seconds = 600  # every 10 minutes
 
-        self.logger.log("Retention manager started")
+        self.logger.info("Retention manager started")
 
         while not self.stop_event.is_set():
             now = datetime.now()
@@ -55,17 +55,17 @@ class RetentionManager(threading.Thread):
                             # shutil.move handles cross-filesystem moves
                             shutil.move(str(file), str(dest))
 
-                            self.logger.log(
+                            self.logger.info(
                                 f"[Retention] Moved old file to backup: {dest}"
                             )
                     except FileNotFoundError as e:
                         # File may be gone already
-                        self.logger.log(
+                        self.logger.info(
                             f"[Retention] Failed to move {file} to backup: {e}, FileNotFoundError"
                         )
                     except OSError as e:
                         # Log other I/O problems (permissions, network issues, etc.)
-                        self.logger.log(
+                        self.logger.info(
                             f"[Retention] Failed to move {file} to backup: {e}"
                         )
 
@@ -81,7 +81,7 @@ class RetentionManager(threading.Thread):
                         # retention_days + backup_retention_days
                         if mtime < delete_cutoff:
                             file.unlink()
-                            self.logger.log(
+                            self.logger.info(
                                 f"[Retention] Deleted expired backup file: {file}"
                             )
                     except FileNotFoundError:

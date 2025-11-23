@@ -3,7 +3,7 @@ import threading
 import time
 from pathlib import Path
 
-from logging.logger import Logger
+from log.logger import Logger
 from recorder.camera_recorder import CameraRecorder
 from recorder.retention_manager import RetentionManager
 from utils.config import Config
@@ -19,7 +19,10 @@ def main() -> None:
         return
 
     # Create logger
-    logger = Logger()
+    logger = Logger().logger
+
+    # Log config
+    conf.log_config(logger)
 
     # Make sure output paths exist
     stream_output_path = Path(conf.stream_output_path)
@@ -29,7 +32,7 @@ def main() -> None:
     stream_backup_output_path.mkdir(parents=True, exist_ok=True)
 
     # Main application log file
-    logger.log(f"NVR starting with config: {conf.config_path}")
+    logger.info(f"NVR starting with config: {conf.config_path}")
 
     cameras = conf.get("cameras") or []
     recorders = []
@@ -53,7 +56,7 @@ def main() -> None:
     stop_event = threading.Event()
 
     def handle_signal(signum, frame):
-        logger.log(f"Received signal {signum}, shutting down...")
+        logger.info(f"Received signal {signum}, shutting down...")
         stop_event.set()
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -63,7 +66,7 @@ def main() -> None:
     while not stop_event.is_set():
         time.sleep(1)
 
-    logger.log("Stopping recorders and retention manager...")
+    logger.info("Stopping recorders and retention manager...")
     retention_manager.stop()
     for rec in recorders:
         rec.stop()
@@ -72,7 +75,7 @@ def main() -> None:
     for rec in recorders:
         rec.join()
 
-    logger.log("All stopped")
+    logger.info("All stopped")
 
 
 if __name__ == "__main__":

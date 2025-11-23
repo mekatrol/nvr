@@ -7,9 +7,9 @@ ffmpeg_binary: ffmpeg # or full path: /usr/bin/ffmpeg
 # Stream settings
 stream:
   segment_seconds: 300 # 5 minutes per file
-  output_path: ../../nvr/streams/active
+  output_path: ../../nvr/streams
   retention_days: 0.1 # backup files older than this many days (can be a partial day too)
-  backup_retention_days: 20
+  backup_retention_days: 5
   backup_output_path: ../../nvr/streams/backup
 
 cameras:
