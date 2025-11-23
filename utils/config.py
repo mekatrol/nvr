@@ -12,8 +12,10 @@ class Config(Singleton, MutableMapping):
     KEY_LOG_PATH: str = "log_path"
     KEY_STREAM: str = "stream"
     KEY_STREAM_OUTPUT_PATH: str = "output_path"
-    KEY_STREAM_SEGMENT_SECONDS: str = "segment_seconds"
     KEY_STREAM_RETENTION_DAYS: str = "retention_days"
+    KEY_STREAM_BACKUP_OUTPUT_PATH: str = "backup_output_path"
+    KEY_STREAM_BACKUP_RETENTION_DAYS: str = "backup_retention_days"
+    KEY_STREAM_SEGMENT_SECONDS: str = "segment_seconds"
     KEY_FFMPEG_BINARY: str = "ffmpeg_binary"
     KEY_CAMERAS: str = "cameras"
     KEY_CAMERA_ID: str = "id"
@@ -23,6 +25,8 @@ class Config(Singleton, MutableMapping):
     stream_output_path = None
     stream_retention_days = 1
     stream_segment_seconds = 5 * 60  # Five minutes
+    stream_backup_output_path = None
+    stream_backup_retention_days = 0
 
     _conf: Dict[str, Any] = {}
     cameras_by_id: Dict[str, Dict[str, Any]]
@@ -174,7 +178,7 @@ class Config(Singleton, MutableMapping):
             errors.append(f"{field_label} must be less than or equal to {max_value}")
             has_error = True
 
-        return has_error
+        return not has_error
 
     @staticmethod
     def _validate_float(
@@ -201,7 +205,7 @@ class Config(Singleton, MutableMapping):
             errors.append(f"{field_label} must be less than or equal to {max_value}")
             has_error = True
 
-        return has_error
+        return not has_error
 
     def _validate(self) -> None:
         errors: List[str] = []
@@ -233,6 +237,23 @@ class Config(Singleton, MutableMapping):
                 0,  # Must be zero or greater
             ):
                 self.stream_retention_days = stream_retention_days
+
+            # stream backup output path is set and a valid path
+            stream_backup_output_path: Any = stream_cfg.get(self.KEY_STREAM_BACKUP_OUTPUT_PATH)
+            if self._validate_dir_path(
+                stream_backup_output_path, "stream->backup_output_path", errors, False
+            ):
+                self.stream_backup_output_path = stream_backup_output_path
+
+            # backup_retention_days is valid integer
+            stream_backup_retention_days: Any = stream_cfg.get(self.KEY_STREAM_BACKUP_RETENTION_DAYS)
+            if self._validate_float(
+                stream_backup_retention_days,
+                "stream->backup_retention_days",
+                errors,
+                0,  # Must be zero or greater
+            ):
+                self.stream_backup_retention_days = stream_backup_retention_days
 
             # segment_seconds is valid integer
             stream_segment_seconds: Any = stream_cfg.get(
