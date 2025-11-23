@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta
-from pathlib import Path
 import threading
 import time
+import shutil
+from pathlib import Path
+from datetime import datetime, timedelta
 
 from logging.logger import Logger
 from utils.config import Config
@@ -30,7 +31,8 @@ class RetentionManager(threading.Thread):
             now = datetime.now()
 
             # Cutoff to move from primary to backup
-            move_cutoff = now - timedelta(days=retention_days)
+            move_delta = timedelta(days=retention_days)
+            move_cutoff = now - move_delta
 
             # Cutoff to delete from backup:
             #   max lifetime = retention_days in primary + backup_retention_days in backup
@@ -49,14 +51,23 @@ class RetentionManager(threading.Thread):
                         mtime = datetime.fromtimestamp(file.stat().st_mtime)
                         if mtime < move_cutoff:
                             dest = backup_cam_dir / file.name
-                            # rename() is atomic on same filesystem
-                            file.rename(dest)
+
+                            # shutil.move handles cross-filesystem moves
+                            shutil.move(str(file), str(dest))
+
                             self.logger.log(
                                 f"[Retention] Moved old file to backup: {dest}"
                             )
-                    except FileNotFoundError:
+                    except FileNotFoundError as e:
                         # File may be gone already
-                        pass
+                        self.logger.log(
+                            f"[Retention] Failed to move {file} to backup: {e}, FileNotFoundError"
+                        )
+                    except OSError as e:
+                        # Log other I/O problems (permissions, network issues, etc.)
+                        self.logger.log(
+                            f"[Retention] Failed to move {file} to backup: {e}"
+                        )
 
             # 2) Delete very old files from backup_path
             for cam_dir in backup_path.glob("*"):
