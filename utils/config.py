@@ -21,7 +21,9 @@ class Config(Singleton, MutableMapping):
     KEY_CAMERAS: str = "cameras"
     KEY_CAMERA_ID: str = "id"
     KEY_CAMERA_NAME: str = "name"
+    KEY_CAMERA_ENABLED: str = "enabled"
     KEY_CAMERA_RTSP_URL: str = "rtsp_url"
+    KEY_CAMERA_LOG_FFMPEG: str = "log_ffmpeg"
 
     stream_output_path = None
     stream_retention_days = 1
@@ -100,8 +102,8 @@ class Config(Singleton, MutableMapping):
         logger.info("ffmpeg_binary=%s", ffmpeg_binary)
 
         # Cameras (RTSP password redacted)
-        for cam_id, cam in self.cameras_by_id.items():
-            safe_cam = dict(cam)
+        for cam_id, camera in self.cameras_by_id.items():
+            safe_cam = dict(camera)
 
             url_val = safe_cam.get(self.KEY_CAMERA_RTSP_URL)
             if isinstance(url_val, str):
@@ -143,31 +145,107 @@ class Config(Singleton, MutableMapping):
         )
 
     @staticmethod
-    def _merge_dicts(
-        base: Dict[str, Any],
-        overrides: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    def _merge_camera_list(
+        base_list: list[dict], override_list: list[dict]
+    ) -> list[dict]:
+        """
+        Merge two camera lists (each a list of dicts) by camera 'id'.
+
+        Rules:
+        - If a camera ID appears only in base → kept as-is
+        - If a camera ID appears in both → deep-merge their fields
+        - If a camera ID appears only in overrides → append it
+        """
+
+        merged_by_id: dict[str, dict] = {}
+
+        # Start with base cameras
+        for camera in base_list:
+            cam_id = camera.get(Config.KEY_CAMERA_ID)
+            if isinstance(cam_id, str):
+                merged_by_id[cam_id] = dict(camera)  # shallow copy
+
+        # Merge in override cameras
+        for override_cam in override_list:
+            cam_id = override_cam.get(Config.KEY_CAMERA_ID)
+            if not isinstance(cam_id, str):
+                continue
+
+            if cam_id in merged_by_id:
+                # Deep merge the individual camera dict
+                merged_by_id[cam_id] = Config._merge_dicts(
+                    merged_by_id[cam_id],
+                    override_cam,
+                )
+            else:
+                merged_by_id[cam_id] = dict(override_cam)
+
+        # Return as a list
+        return list(merged_by_id.values())
+
+    @staticmethod
+    def _merge_stream_dict(
+        base_stream: dict[str, Any] | None,
+        override_stream: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """
+        Merge two 'stream' dicts.
+
+        Rules:
+        - base_stream provides defaults.
+        - override_stream only overrides specified fields.
+        - If override_stream is not a dict, base_stream is returned unchanged.
+        """
+
+        if not isinstance(base_stream, dict):
+            base_stream = {}
+        if not isinstance(override_stream, dict):
+            return base_stream
+
+        # Reuse _merge_dicts for nested keys:
+        return Config._merge_dicts(base_stream, override_stream)
+
+    @staticmethod
+    def _merge_dicts(base: Any, overrides: Any) -> Any:
         """
         Recursively merge `overrides` into `base`.
 
-        - If a key exists in both and both values are dicts, merge them.
-        - Otherwise, the value from `overrides` replaces the one in `base`.
+        Special cases:
+        - KEY_CAMERAS: merge lists by camera 'id' instead of replacing.
+        - KEY_STREAM:  deep-merge dict instead of replacing, and ignore
+                       non-dict overrides.
         """
-        if not isinstance(base, dict):
-            base = {}
 
-        if not isinstance(overrides, dict):
-            return base
+        # Case: both are dicts → deep merge by key
+        if isinstance(base, dict) and isinstance(overrides, dict):
+            result = dict(base)
+            for key, override_value in overrides.items():
+                base_value = base.get(key)
 
-        for key, override_value in overrides.items():
-            base_value: Any = base.get(key)
+                # Cameras: list merge by id
+                if (
+                    key == Config.KEY_CAMERAS
+                    and isinstance(base_value, list)
+                    and isinstance(override_value, list)
+                ):
+                    result[key] = Config._merge_camera_list(base_value, override_value)
 
-            if isinstance(base_value, dict) and isinstance(override_value, dict):
-                base[key] = Config._merge_dicts(base_value, override_value)
-            else:
-                base[key] = override_value
+                # Stream: dict merge, ignore non-dict overrides
+                elif (
+                    key == Config.KEY_STREAM
+                    and isinstance(base_value, dict)
+                    and isinstance(override_value, dict)
+                ):
+                    result[key] = Config._merge_stream_dict(base_value, override_value)
 
-        return base
+                else:
+                    # Generic recursive merge
+                    result[key] = Config._merge_dicts(base_value, override_value)
+
+            return result
+
+        # For non-dicts, overrides completely replace base
+        return overrides
 
     @staticmethod
     def _load_config(path: str) -> Dict[str, Any]:
@@ -338,12 +416,12 @@ class Config(Singleton, MutableMapping):
             ids: Set[str] = set()
             names: Set[str] = set()
 
-            for index, cam in enumerate(cameras):
-                if not isinstance(cam, dict):
+            for index, camera in enumerate(cameras):
+                if not isinstance(camera, dict):
                     errors.append(f"camera entry at index {index} must be a mapping")
                     continue
 
-                camera_id: Any = cam.get(self.KEY_CAMERA_ID)
+                camera_id: Any = camera.get(self.KEY_CAMERA_ID)
                 if not isinstance(camera_id, str) or not camera_id:
                     errors.append(f"camera at index {index} must have a non-empty 'id'")
                 elif camera_id in ids:
@@ -351,7 +429,7 @@ class Config(Singleton, MutableMapping):
                 else:
                     ids.add(camera_id)
 
-                camera_name: Any = cam.get(self.KEY_CAMERA_NAME)
+                camera_name: Any = camera.get(self.KEY_CAMERA_NAME)
                 if not isinstance(camera_name, str) or not camera_name:
                     errors.append(
                         f"camera '{camera_id or index}' must have a non-empty 'name'"
@@ -361,7 +439,19 @@ class Config(Singleton, MutableMapping):
                 else:
                     names.add(camera_name)
 
-                rtsp_url_val: Any = cam.get(self.KEY_CAMERA_RTSP_URL)
+                # enabled: may be missing (defaults to False) or a boolean.
+                if self.KEY_CAMERA_ENABLED not in camera:
+                    # Missing -> default to False
+                    camera[self.KEY_CAMERA_ENABLED] = False
+                else:
+                    enabled_val: Any = camera.get(self.KEY_CAMERA_ENABLED)
+                    if not isinstance(enabled_val, bool):
+                        errors.append(
+                            f"camera '{camera_id or index}' has invalid "
+                            f"'enabled' (must be true/false if present)"
+                        )
+
+                rtsp_url_val: Any = camera.get(self.KEY_CAMERA_RTSP_URL)
                 if not isinstance(rtsp_url_val, str) or not rtsp_url_val:
                     errors.append(
                         f"camera '{camera_id or index}' must have a non-empty 'rtsp_url'"
@@ -372,6 +462,18 @@ class Config(Singleton, MutableMapping):
                         errors.append(
                             f"camera '{camera_id or index}' has invalid rtsp_url "
                             f"(scheme must be rtsp): {rtsp_url_val}"
+                        )
+
+                # log_ffmpeg: may be missing (defaults to False) or a boolean.
+                if self.KEY_CAMERA_LOG_FFMPEG not in camera:
+                    # Missing -> default to False
+                    camera[self.KEY_CAMERA_LOG_FFMPEG] = False
+                else:
+                    log_ffmpeg_val: Any = camera.get(self.KEY_CAMERA_LOG_FFMPEG)
+                    if not isinstance(log_ffmpeg_val, bool):
+                        errors.append(
+                            f"camera '{camera_id or index}' has invalid "
+                            f"'log_ffmpeg' (must be true/false if present)"
                         )
 
         if errors:

@@ -29,18 +29,20 @@ class CameraRecorder(threading.Thread):
         self.logger = Logger().logger
 
         # Per-camera ffmpeg log file
-        self.log_dir = Path(self.global_conf.get("log_path", "./logs"))
+        self.log_dir = Path(self.global_conf.get(Config.KEY_LOG_PATH, "./logs"))
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.ffmpeg_log_path = self.log_dir / f"{self.camera_conf['name']}.ffmpeg.log"
+        self.ffmpeg_log_path = (
+            self.log_dir / f"{self.camera_conf[Config.KEY_CAMERA_NAME]}.ffmpeg.log"
+        )
 
     def build_ffmpeg_command(self) -> Tuple[List[str], str]:
         """
         Build the ffmpeg command and return (cmd_list, rtsp_url).
         """
         stream_output_path = Path(self.global_conf.stream_output_path)
-        camera_name = self.camera_conf["name"]
+        camera_name = self.camera_conf[Config.KEY_CAMERA_NAME]
         segment_seconds = self.global_conf.stream_segment_seconds
-        ffmpeg_bin = self.global_conf.get("ffmpeg_binary", "ffmpeg")
+        ffmpeg_bin = self.global_conf.get(Config.KEY_FFMPEG_BINARY, "ffmpeg")
 
         out_dir = stream_output_path / camera_name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -48,7 +50,7 @@ class CameraRecorder(threading.Thread):
         # e.g. 20251122_203000_300s.mp4
         out_pattern = str(out_dir / f"%Y%m%d_%H%M%S_{segment_seconds}s.mp4")
 
-        rtsp_url: str = self.camera_conf["rtsp_url"]
+        rtsp_url: str = self.camera_conf[Config.KEY_CAMERA_RTSP_URL]
 
         cmd: List[str] = [
             ffmpeg_bin,
@@ -85,10 +87,10 @@ class CameraRecorder(threading.Thread):
                 pass
 
     def run(self) -> None:
-        camera_name = self.camera_conf["name"]
+        camera_name = self.camera_conf[Config.KEY_CAMERA_NAME]
 
         # Only start if enabled
-        if not self.camera_conf.get("enabled", True):
+        if not self.camera_conf.get(Config.KEY_CAMERA_ENABLED, False):
             self.logger.info(
                 "Skipping recorder for camera %s because it is disabled",
                 camera_name,
@@ -150,28 +152,43 @@ class CameraRecorder(threading.Thread):
                     bufsize=1,
                 )
 
+                log_ffmpeg = self.camera_conf[Config.KEY_CAMERA_LOG_FFMPEG]
                 assert self.proc.stdout is not None
-                with open(
-                    self.ffmpeg_log_path,
-                    "a",
-                    buffering=1,
-                    encoding="utf-8",
-                ) as log_file:
-                    for line in self.proc.stdout:
-                        if line is None:
-                            break
+                with self.proc.stdout as proc_out:
+                    # Open file only if logging is enabled
+                    log_file = (
+                        open(
+                            self.ffmpeg_log_path,
+                            "a",
+                            buffering=1,
+                            encoding="utf-8",
+                        )
+                        if log_ffmpeg
+                        else None
+                    )
 
-                        raw_line = line.rstrip("\n")
-                        safe_line = sanitize_rtsp_url(raw_line)
-                        log_file.write(safe_line + "\n")
+                    try:
+                        for line in proc_out:
+                            if line is None:
+                                break
 
-                        # Detect auth errors in ffmpeg output (case-insensitive)
-                        lower = raw_line.lower()
-                        if any(marker in lower for marker in auth_error_markers):
-                            auth_error_detected = True
+                            raw_line = line.rstrip("\n")
+                            safe_line = sanitize_rtsp_url(raw_line)
 
-                        if self.stop_event.is_set():
-                            break
+                            # Write to per-camera log file only when enabled
+                            if log_file is not None:
+                                log_file.write(safe_line + "\n")
+
+                            # Detect auth errors in ffmpeg output (case-insensitive)
+                            lower = raw_line.lower()
+                            if any(marker in lower for marker in auth_error_markers):
+                                auth_error_detected = True
+
+                            if self.stop_event.is_set():
+                                break
+                    finally:
+                        if log_file is not None:
+                            log_file.close()
 
                 # Wait for process to exit (in case stdout loop ended early)
                 ret = self.proc.wait()

@@ -16,14 +16,17 @@ cameras:
   - id: driveway
     name: driveway
     enabled: true
+    log_ffmpeg: false
     rtsp_url: rtsp://{RTSP_USER}:{RTSP_PASSWORD}@camera-driveway.lan/Streaming/Channels/101/
 
   - id: garage
     name: garage
     enabled: true
+    log_ffmpeg: false
     rtsp_url: rtsp://{RTSP_USER}:{RTSP_PASSWORD}@camera-garage.lan/Streaming/Channels/101/
 
   - id: front_yard
     name: front_yard
     enabled: true
+    log_ffmpeg: false
     rtsp_url: rtsp://{RTSP_USER}:{RTSP_PASSWORD}@camera-front-right.lan/Streaming/Channels/101/
