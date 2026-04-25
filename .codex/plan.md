@@ -27,9 +27,12 @@ The target scenario is monitoring a camera for a person approaching in a configu
 
 ## Current Status
 
-Status: Phase 1 complete; Phase 2 pending
+Status: Phase 2 complete; Phase 3 pending
 
-The repository has been restructured into a `src` layout. No pipeline implementation has started yet.
+The repository has been restructured into a `src` layout. Phase 2 discovery chose
+a separate sampled frame acquisition path for initial pipeline input, leaving the
+existing ffmpeg recording subprocess untouched. No pipeline implementation has
+started yet.
 
 ## Key Design Decisions
 
@@ -50,16 +53,32 @@ The repository has been restructured into a `src` layout. No pipeline implementa
   Notes: Define a small plugin contract before writing sample modules.
 
 - Decision: The processing system is a graph of named pipelines, not only one linear pipeline.
-  Status: proposed
+  Status: accepted
   Notes: A named pipeline contains an ordered chain of stages. Pipeline outputs can fan out to multiple downstream pipelines and fan in from multiple upstream pipelines. See `.codex/architecture.md`.
 
 - Decision: Each stage receives the original image, the current image, and mutable metadata.
-  Status: proposed
+  Status: accepted
   Notes: The original image must remain available to every stage in every named pipeline and must not be overwritten by downstream transformations.
 
 - Decision: Disabled stages stay configured but are skipped at runtime.
-  Status: proposed
+  Status: accepted
   Notes: This allows users to turn modules on and off without deleting configuration.
+
+- Decision: Initial pipeline input comes from a separate sampled frame acquisition path, not from the recording ffmpeg process.
+  Status: accepted
+  Notes: `CameraRecorder` currently runs ffmpeg with `-c copy` into segmented MP4 files and does not expose decoded frames. Phase 6 should add a separate per-camera pipeline worker that samples RTSP frames at the configured interval, so pipeline failures and decode overhead stay isolated from recording.
+
+- Decision: Pipeline configuration supports global defaults plus per-camera overrides.
+  Status: accepted
+  Notes: Global graph configuration defines reusable defaults. Camera-level overrides can disable or customize pipeline behavior for individual cameras while preserving existing camera-list merge behavior by camera `id`.
+
+- Decision: Initial graph support is directed acyclic only.
+  Status: accepted
+  Notes: Reject cycles during configuration or graph validation. Feedback loops can be reconsidered later with explicit buffering, scheduling, and termination rules.
+
+- Decision: Initial fan-in behavior requires all configured upstream inputs for the same frame.
+  Status: accepted
+  Notes: Phase 3 should model required inputs and same-frame correlation. Timeout and partial-input behavior are deferred until the graph runner is connected to live acquisition.
 
 - Decision: Debugging should support step, run, breakpoint, step over a single module stage, and step over a whole named pipeline.
   Status: proposed
@@ -67,13 +86,9 @@ The repository has been restructured into a `src` layout. No pipeline implementa
 
 ## Open Questions
 
-- Should the pipeline run on live frames, completed MP4 segments, snapshots extracted from `ffmpeg`, or a separate camera frame reader?
-- What frame rate should the pipeline process for detection: every frame, every Nth frame, or time-based sampling?
 - Should processed images be persisted for debugging, kept in memory, or both?
 - Which MQTT broker settings and topic format should be supported?
-- Should plugin configuration be global, per camera, or both?
 - Should AI detection use a bundled model, a user-provided model path, or an external service?
-- Should fan-in pipelines require all upstream outputs, allow partial input, or support both by configuration?
 - What timeout should apply when a fan-in pipeline waits for multiple upstream outputs from the same frame?
 - How should branch metadata conflicts be resolved when two upstream pipelines write the same metadata key?
 
@@ -253,24 +268,36 @@ Milestone test:
 
 ### Phase 2: Discovery and Shape
 
-Status: pending
+Status: complete
 
 Purpose: Understand the current recorder lifecycle and choose where the pipeline should attach without disrupting recording.
 
 Tasks:
 
-- [ ] Read the restructured service entry point, config module, camera recorder, and retention manager.
-- [ ] Identify where camera frames or snapshots can be obtained safely.
-- [ ] Decide whether initial pipeline input comes from live frames, snapshots, or recorded segments.
-- [ ] Decide whether pipeline configuration is global, per camera, or both.
-- [ ] Decide whether the first implementation supports only acyclic graphs or reserves support for explicit feedback loops later.
-- [ ] Decide the initial fan-in behavior: require all upstream inputs, allow partial input, or configure per pipeline.
-- [ ] Document the chosen integration point in this file.
+- [x] Read the restructured service entry point, config module, camera recorder, and retention manager.
+- [x] Identify where camera frames or snapshots can be obtained safely.
+- [x] Decide whether initial pipeline input comes from live frames, snapshots, or recorded segments.
+- [x] Decide whether pipeline configuration is global, per camera, or both.
+- [x] Decide whether the first implementation supports only acyclic graphs or reserves support for explicit feedback loops later.
+- [x] Decide the initial fan-in behavior: require all upstream inputs, allow partial input, or configure per pipeline.
+- [x] Document the chosen integration point in this file.
+
+Discovery notes:
+
+- `nvr.py` is only a compatibility launcher. `src/nvr_background/main.py` owns service startup, starts one `CameraRecorder` thread per enabled camera, starts `RetentionManager`, and coordinates shutdown.
+- `CameraRecorder` owns recording only. It starts a camera-specific ffmpeg process using RTSP TCP input, `-an`, `-c copy`, segment muxing, strftime output names, and stdout/stderr monitoring. Because the recorder copies encoded packets directly into MP4 segments, it does not decode frames or provide an in-process frame stream.
+- `RetentionManager` only moves and deletes completed `.mp4` files by modification time. It is not a good pipeline input point for near-real-time detection and should remain independent from image processing.
+- The safest initial integration point is a new background pipeline worker started from `src/nvr_background/main.py` alongside each enabled `CameraRecorder`. The worker should use the camera's expanded RTSP URL through a separate sampled frame reader, apply `pipeline_graph.frame_interval_seconds`, and pass decoded frames to the graph runner.
+- Recording must remain the primary behavior. Pipeline worker failures should be logged, sanitized, and isolated from recorder threads. The recorder should not depend on pipeline startup, pipeline frame decoding, model loading, MQTT output, or debugger state.
+- Initial graph execution should use generated images or fixture inputs during Phase 3 through Phase 5. Live RTSP acquisition belongs in Phase 6 after the graph interfaces and config validation exist.
+- Pipeline configuration should start with global defaults and allow per-camera overrides. This fits the existing `config.debug.yaml` overlay and camera merge-by-`id` behavior while letting individual cameras disable or tune processing.
+- Initial graph validation should reject cycles. Feedback loops are out of scope until explicit scheduling semantics exist.
+- Initial fan-in should require all configured upstream outputs for the same frame before running the downstream pipeline. Partial fan-in and timeout behavior remain open for the live acquisition phase.
 
 Milestone test:
 
-- [ ] No code required unless needed for discovery.
-- [ ] If code changes are made, run compileall and Ruff.
+- [x] No code required unless needed for discovery.
+- [x] If code changes are made, run compileall and Ruff.
 
 ### Phase 3: Core Pipeline Interfaces
 
@@ -506,27 +533,22 @@ Last updated: 2026-04-25
 
 Completed this session:
 
-- Completed Phase 1 `src` restructuring.
-- Chose separate Python package layout: `src/nvr_background`, `src/nvr_common`, and `src/nvr_web`.
-- Moved recorder lifecycle and retention code into `nvr_background`.
-- Moved config, singleton, and logging code into `nvr_common`.
-- Added reserved Python `nvr_web` package.
-- Recorded user-created Vue SPA subproject at `src/nvr_ui`.
-- Added root `.gitignore` guards for `src/nvr_ui` generated files.
-- Kept root `nvr.py` as a thin compatibility launcher.
-- Updated validation commands in `.codex/environment.md`, `AGENTS.md`, and this plan.
+- Completed Phase 2 discovery.
+- Read `.codex/environment.md`, `.codex/architecture.md`, `.codex/plan.md`, `AGENTS.md`, `nvr.py`, `src/nvr_background/main.py`, `src/nvr_common/config.py`, `src/nvr_background/recorder/camera_recorder.py`, and `src/nvr_background/recorder/retention_manager.py`.
+- Chose a separate sampled frame acquisition path for initial pipeline input.
+- Chose global pipeline defaults with per-camera overrides.
+- Chose directed acyclic graph validation for the initial implementation.
+- Chose required same-frame upstream outputs for initial fan-in behavior.
+- Documented the integration point and Phase 2 decisions in this plan.
 
 Current blockers:
 
-- Need Phase 2 discovery before implementation choices are finalized.
 - Frontend implementation should wait until backend debugger APIs exist.
 
 Next recommended task:
 
-- Start Phase 2 discovery by reading the restructured service entry point, config module, camera recorder, and retention manager, then choose the pipeline integration point.
+- Start Phase 3 by adding the core pipeline interfaces and graph validation in `src/nvr_common`.
 
 Validation last run:
 
-- `.venv/bin/python -m compileall nvr.py src`
-- `.venv/bin/ruff check .`
-- `PYTHONPATH=src .venv/bin/python -c "import nvr_background.main; import nvr_common.config; import nvr_web"`
+- Not run this session because only `.codex/plan.md` changed.
