@@ -24,6 +24,7 @@ class PipelineGraphRunner:
         self.graph = graph
         self.stage_loader = stage_loader or PipelineStageLoader()
         self.logger = logger
+        self._stage_instances: dict[tuple[str, str], Any] = {}
 
     def run(
         self,
@@ -96,7 +97,7 @@ class PipelineGraphRunner:
             if not stage_config.enabled:
                 continue
 
-            stage = self.stage_loader.load(stage_config)
+            stage = self._load_stage(pipeline_id, stage_config)
             context = PipelineContext(
                 camera_id=first_input.camera_id,
                 frame_id=first_input.frame_id,
@@ -142,3 +143,9 @@ class PipelineGraphRunner:
             return deepcopy(first_input.metadata)
 
         return {}
+
+    def _load_stage(self, pipeline_id: str, stage_config: Any) -> Any:
+        cache_key = (pipeline_id, stage_config.id)
+        if cache_key not in self._stage_instances:
+            self._stage_instances[cache_key] = self.stage_loader.load(stage_config)
+        return self._stage_instances[cache_key]

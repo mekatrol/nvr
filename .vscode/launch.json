@@ -1,16 +1,73 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File with Arguments",
+            "name": "Debug NVR Web App",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nvr_web",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "console": "internalConsole",
+            "internalConsoleOptions": "openOnSessionStart",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": true,
+            "preLaunchTask": "Start NVR Vue UI",
+            "serverReadyAction": {
+                "pattern": "NVR web UI ready at (https?://\\S+)",
+                "uriFormat": "%s",
+                "action": "openExternally"
+            }
+        },
+        {
+            "name": "Debug NVR Web API Only",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nvr_web",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": true
+        },
+        {
+            "name": "Debug NVR Vue UI",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev:debug"
+            ],
+            "cwd": "${workspaceFolder}/src/nvr_ui",
+            "console": "integratedTerminal",
+            "serverReadyAction": {
+                "pattern": "Local:\\s+(https?://\\S+)",
+                "uriFormat": "%s",
+                "action": "debugWithChrome",
+                "webRoot": "${workspaceFolder}/src/nvr_ui"
+            }
+        },
+        {
+            "name": "Debug NVR Background Service",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/nvr.py",
+            "python": "${workspaceFolder}/.venv/bin/python",
             "console": "integratedTerminal",
             "args": []
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Debug NVR Web App with JS Debugger",
+            "configurations": [
+                "Debug NVR Web API Only",
+                "Debug NVR Vue UI"
+            ],
+            "stopAll": true
         }
     ]
 }

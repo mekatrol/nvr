@@ -13,14 +13,14 @@ stream:
   backup_output_path: ../../nvr/streams/backup
 
 pipeline_graph:
-  enabled: false
+  enabled: true
   frame_interval_seconds: 1.0
   pipelines:
     - id: preprocessing
       enabled: true
       stages:
-        - id: example-disabled-crop
-          enabled: false
+        - id: example-crop
+          enabled: true
           module: nvr_common.pipeline.sample_stages.crop_stage
           class: CropStage
           config:
@@ -32,8 +32,8 @@ pipeline_graph:
     - id: thumbnail
       enabled: true
       stages:
-        - id: example-disabled-thumbnail
-          enabled: false
+        - id: example-thumbnail
+          enabled: true
           module: nvr_common.pipeline.sample_stages.resize_stage
           class: ResizeStage
           config:

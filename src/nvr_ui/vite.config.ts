@@ -12,8 +12,13 @@ export default defineConfig(({ command }) => ({
     emptyOutDir: true,
     outDir: '../nvr_web/web',
   },
+  server: {
+    proxy: {
+      '/api': 'http://127.0.0.1:8080',
+    },
+  },
   define: {
-    __API_BASE_URL__: JSON.stringify(command === 'serve' ? 'http://nvr.lan:8080' : ''),
+    __API_BASE_URL__: JSON.stringify(command === 'serve' ? '' : ''),
   },
   plugins: [vue(), vueDevTools()],
   resolve: {

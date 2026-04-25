@@ -27,14 +27,15 @@ The target scenario is monitoring a camera for a person approaching in a configu
 
 ## Current Status
 
-Status: Phase 5 complete; Phase 6 pending
+Status: Phase 11 complete; Phase 12 pending
 
 The repository has been restructured into a `src` layout. Phase 2 discovery chose
 a separate sampled frame acquisition path for initial pipeline input, leaving the
 existing ffmpeg recording subprocess untouched. Core pipeline graph interfaces,
 validation, dynamic stage loading, synthetic-frame execution, YAML
-configuration parsing, and OpenCV-backed sample stages now exist under
-`src/nvr_common`.
+configuration parsing, OpenCV-backed sample stages, camera pipeline worker
+prototype, synthetic detection/tracking/event stages, debug backend, web API
+boundary, and Vue debugger UI now exist.
 
 ## Key Design Decisions
 
@@ -83,8 +84,8 @@ configuration parsing, and OpenCV-backed sample stages now exist under
   Notes: Phase 3 should model required inputs and same-frame correlation. Timeout and partial-input behavior are deferred until the graph runner is connected to live acquisition.
 
 - Decision: Debugging should support step, run, breakpoint, step over a single module stage, and step over a whole named pipeline.
-  Status: proposed
-  Notes: Implement backend debug control for both graph-level and stage-level execution before building the Vue UI.
+  Status: accepted
+  Notes: Implemented through `PipelineDebugSession`, `nvr_web` debug API endpoints, and the Vue debugger UI.
 
 ## Open Questions
 
@@ -415,116 +416,147 @@ Validation results:
 
 ### Phase 6: Camera Integration Prototype
 
-Status: pending
+Status: complete
 
 Purpose: Connect the pipeline to camera input at a controlled sampling rate while preserving recording behavior.
 
 Tasks:
 
-- [ ] Implement frame acquisition based on the Phase 2 decision.
-- [ ] Add per-camera graph runner lifecycle management.
-- [ ] Ensure pipeline failures are logged and isolated from recording failures.
-- [ ] Add sampling controls such as every N seconds or every N frames.
-- [ ] Add structured logs that do not expose RTSP credentials.
-- [ ] Test with local image or video fixtures instead of real cameras where possible.
+- [x] Implement frame acquisition based on the Phase 2 decision.
+- [x] Add per-camera graph runner lifecycle management.
+- [x] Ensure pipeline failures are logged and isolated from recording failures.
+- [x] Add sampling controls such as every N seconds or every N frames.
+- [x] Add structured logs that do not expose RTSP credentials.
+- [x] Test with local image or video fixtures instead of real cameras where possible.
+
+Implementation notes:
+
+- Added `CameraPipelineWorker` under `src/nvr_background/pipeline`, using a separate OpenCV frame source and `PipelineGraphRunner`.
+- Added `OpenCvFrameSource` for RTSP/video capture and `ImageFileFrameSource` for fixture-driven tests.
+- `src/nvr_background/main.py` now starts pipeline workers alongside enabled recorders when a per-camera effective pipeline graph is enabled.
+- Pipeline worker errors are logged and isolated from recorder threads; the worker samples according to `pipeline_graph.frame_interval_seconds`.
 
 Milestone test:
 
-- [ ] Run integration-style tests with fixture input.
-- [ ] Run compileall and Ruff.
+- [x] Run integration-style tests with fixture input.
+- [x] Run compileall and Ruff.
 - [ ] Manual live-camera run only if explicitly requested.
 
 ### Phase 7: Detection and Tracking Foundation
 
-Status: pending
+Status: complete
 
 Purpose: Add enough AI/object-processing structure to detect people and reason about movement direction.
 
 Tasks:
 
-- [ ] Choose initial person detection strategy.
-- [ ] Support model path or detector configuration.
-- [ ] Add metadata schema for detections: class, confidence, bounding box, timestamp, and track id if available.
-- [ ] Add movement tracking metadata across frames.
-- [ ] Add approach-direction detection as a separate stage.
-- [ ] Add tests for approach logic using synthetic detection sequences.
+- [x] Choose initial person detection strategy.
+- [x] Support model path or detector configuration.
+- [x] Add metadata schema for detections: class, confidence, bounding box, timestamp, and track id if available.
+- [x] Add movement tracking metadata across frames.
+- [x] Add approach-direction detection as a separate stage.
+- [x] Add tests for approach logic using synthetic detection sequences.
+
+Implementation notes:
+
+- Initial detection strategy is synthetic/configured detections through `SyntheticPersonDetectorStage`; real model inference remains a later Phase 12+ enhancement.
+- Added `MovementTrackerStage` with stateful per-track center movement, enabled by stage-instance caching in `PipelineGraphRunner`.
+- Added `ApproachDirectionStage` to emit an event when tracked movement crosses a configured direction and minimum delta.
 
 Milestone test:
 
-- [ ] Run detection/tracking unit tests.
-- [ ] Run compileall and Ruff.
+- [x] Run detection/tracking unit tests.
+- [x] Run compileall and Ruff.
 
 ### Phase 8: MQTT Event Output
 
-Status: pending
+Status: complete
 
 Purpose: Emit controlled MQTT messages when pipeline metadata indicates an actionable event.
 
 Tasks:
 
-- [ ] Add MQTT dependency if needed.
-- [ ] Add MQTT config with host, port, auth, TLS, topic, and payload options.
-- [ ] Ensure credentials are not logged.
-- [ ] Implement an MQTT event stage.
-- [ ] Add rate limiting or cooldown to avoid repeated light-on messages.
-- [ ] Add tests using a fake MQTT client.
+- [x] Add MQTT dependency if needed.
+- [x] Add MQTT config with host, port, auth, TLS, topic, and payload options.
+- [x] Ensure credentials are not logged.
+- [x] Implement an MQTT event stage.
+- [x] Add rate limiting or cooldown to avoid repeated light-on messages.
+- [x] Add tests using a fake MQTT client.
+
+Implementation notes:
+
+- Added `paho-mqtt` to `requirements.txt`.
+- Added `MqttEventStage` with host, port, username, password, TLS, topic, payload, event key, and cooldown options.
+- Tests use an injected fake MQTT client factory so no broker or credentials are required.
 
 Milestone test:
 
-- [ ] Run MQTT stage tests.
-- [ ] Run compileall and Ruff.
+- [x] Run MQTT stage tests.
+- [x] Run compileall and Ruff.
 - [ ] Optional manual test against a local broker only when explicitly requested.
 
 ### Phase 9: Debug Backend
 
-Status: pending
+Status: complete
 
 Purpose: Make pipeline execution inspectable and controllable before building the web UI.
 
 Tasks:
 
-- [ ] Add debug session state for each camera, graph run, pipeline run, and stage run.
-- [ ] Support breakpoints by pipeline id and stage id.
-- [ ] Support run, pause, step, and step over one stage.
-- [ ] Support step over one named pipeline.
-- [ ] Show fan-out branches and fan-in waits in debug state.
-- [ ] Store current stage input image, output image, metadata before, and metadata after.
-- [ ] Add APIs or service methods that the future web UI can call.
-- [ ] Ensure debug mode has bounded memory use.
-- [ ] Add tests for stepping and breakpoint behavior.
+- [x] Add debug session state for each camera, graph run, pipeline run, and stage run.
+- [x] Support breakpoints by pipeline id and stage id.
+- [x] Support run, pause, step, and step over one stage.
+- [x] Support step over one named pipeline.
+- [x] Show fan-out branches and fan-in waits in debug state.
+- [x] Store current stage input image, output image, metadata before, and metadata after.
+- [x] Add APIs or service methods that the future web UI can call.
+- [x] Ensure debug mode has bounded memory use.
+- [x] Add tests for stepping and breakpoint behavior.
+
+Implementation notes:
+
+- Added `PipelineDebugSession` and `StageDebugRecord` under `src/nvr_common/pipeline/debug`.
+- Debug sessions keep bounded stage records, breakpoint state, cursor status, metadata before/after, and image shape summaries.
+- Debug execution supports run, pause state, step, step over stage, and step over pipeline service methods.
 
 Milestone test:
 
-- [ ] Run debug backend tests.
-- [ ] Run compileall and Ruff.
+- [x] Run debug backend tests.
+- [x] Run compileall and Ruff.
 
 ### Phase 10: Web UI API Boundary
 
-Status: pending
+Status: complete
 
 Purpose: Define and implement backend HTTP/WebSocket endpoints for the future Vue debugger.
 
 Tasks:
 
-- [ ] Choose backend serving approach compatible with the current service.
-- [ ] Add endpoint to list cameras and pipeline stages.
-- [ ] Add endpoint to list the pipeline graph, named pipelines, stages, and edges.
-- [ ] Add endpoint to get debug session state.
-- [ ] Add endpoint to set or clear breakpoints.
-- [ ] Add endpoint to command run, pause, step, and step over.
-- [ ] Add endpoint or stream for input/output image previews.
-- [ ] Add endpoint to inspect metadata.
-- [ ] Add tests for API behavior.
+- [x] Choose backend serving approach compatible with the current service.
+- [x] Add endpoint to list cameras and pipeline stages.
+- [x] Add endpoint to list the pipeline graph, named pipelines, stages, and edges.
+- [x] Add endpoint to get debug session state.
+- [x] Add endpoint to set or clear breakpoints.
+- [x] Add endpoint to command run, pause, step, and step over.
+- [x] Add endpoint or stream for input/output image previews.
+- [x] Add endpoint to inspect metadata.
+- [x] Add tests for API behavior.
+
+Implementation notes:
+
+- Added a standard-library HTTP server under `src/nvr_web`, runnable with `PYTHONPATH=src .venv/bin/python -m nvr_web`.
+- Added JSON endpoints: `/api/cameras`, `/api/pipeline-graph`, `/api/debug/state`, `/api/debug/breakpoints`, `/api/debug/command`, `/api/debug/preview`, and `/api/debug/metadata`.
+- API tests exercise the request handler with in-memory streams because the sandbox blocks local socket creation.
 
 Milestone test:
 
-- [ ] Run API tests.
-- [ ] Run compileall and Ruff.
-- [ ] Manual UI testing deferred until frontend screens are implemented.
+- [x] Run API tests.
+- [x] Run compileall and Ruff.
+- [x] Manual UI testing deferred until frontend screens are implemented.
 
 ### Phase 11: Vue Debugger Subproject
 
-Status: pending
+Status: complete
 
 Note: The user manually created the Vue 3 TypeScript Vite subproject at `src/nvr_ui`.
 
@@ -533,18 +565,36 @@ Purpose: Build the visual debugger once the backend API exists and the frontend 
 Tasks:
 
 - [x] Wait for user confirmation that the Vue subproject has been created.
-- [ ] Read the generated frontend structure and package scripts.
-- [ ] Build a debugger view with camera selection, stage list, breakpoints, controls, image previews, and metadata panel.
-- [ ] Use Vue 3 Composition API and strict TypeScript.
-- [ ] Avoid spin controls for floating-point entry; use validated text inputs.
-- [ ] Avoid gradient styling unless explicitly requested.
-- [ ] Add frontend tests or type checks based on the generated project setup.
+- [x] Read the generated frontend structure and package scripts.
+- [x] Build a debugger view with camera selection, stage list, breakpoints, controls, image previews, and metadata panel.
+- [x] Use Vue 3 Composition API and strict TypeScript.
+- [x] Avoid spin controls for floating-point entry; use validated text inputs.
+- [x] Avoid gradient styling unless explicitly requested.
+- [x] Add frontend tests or type checks based on the generated project setup.
+
+Implementation notes:
+
+- Replaced the generated Vue starter screen with a debugger workspace in `src/nvr_ui/src/App.vue`.
+- The UI loads cameras and graph data, runs debug commands, sets or clears breakpoints, shows pipeline/stage cards, shows latest input/output shape summaries, and displays metadata JSON.
+- Styling is a restrained operational UI with no gradients and no numeric spin inputs.
 
 Milestone test:
 
-- [ ] Run frontend type check.
-- [ ] Run frontend tests if configured.
-- [ ] Start the frontend dev server and provide the local URL when requested or useful.
+- [x] Run frontend type check.
+- [x] Run frontend tests if configured.
+- [x] Start the frontend dev server and provide the local URL when requested or useful.
+
+Validation results for Phases 6-11:
+
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest tests.test_camera_pipeline_worker`
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest tests.test_detection_tracking_mqtt`
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest tests.test_debug_api`
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest discover`
+- [x] `.venv/bin/python -m compileall nvr.py src`
+- [x] `.venv/bin/ruff check .`
+- [x] `npm run type-check` from `src/nvr_ui`
+- [x] Started backend API at `http://127.0.0.1:8080/`
+- [x] Started Vite debugger UI at `http://127.0.0.1:5173/`
 
 ### Phase 12: End-to-End Scenario
 
@@ -576,24 +626,31 @@ Last updated: 2026-04-25
 
 Completed this session:
 
-- Completed Phase 3 core pipeline interfaces.
-- Added `src/nvr_common/pipeline` data structures and graph runner.
-- Added dynamic stage loading from Python module and class names.
-- Added validation for duplicate pipeline ids, duplicate stage ids, unknown edge references, self-edges, and cycles.
-- Added stage skipping, fan-out execution, required-input fan-in execution, original-image access, and metadata isolation behavior.
-- Added `unittest` coverage using synthetic images and local test plugin stages.
+- Completed Phases 6 through 11.
+- Added separate OpenCV frame acquisition and `CameraPipelineWorker` lifecycle alongside recorder threads.
+- Added synthetic detection, movement tracking, approach-direction event, and MQTT event sample stages.
+- Added bounded pipeline debug session state with breakpoints, run, pause, step, step-over-stage, and step-over-pipeline behavior.
+- Added standard-library `nvr_web` debug API endpoints and static UI serving.
+- Replaced the generated Vue starter page with a strict TypeScript debugger workspace.
+- Added Python tests for fixture frame acquisition, detection/tracking, MQTT fake-client publishing, debug stepping, and API behavior.
+- Updated VS Code F5 debug configuration so `Debug NVR Web App` starts the Python web API, starts the Vite UI task, and opens the browser at `http://127.0.0.1:5173/`.
+- Enabled the default checked-in sample `pipeline_graph` and sample crop/thumbnail stages so the debugger starts with runnable pipeline stages.
 
 Current blockers:
 
-- Frontend implementation should wait until backend debugger APIs exist.
+- Real person detection remains synthetic/configured until a model strategy is selected.
+- Live RTSP pipeline acquisition has not been manually tested against real cameras.
+- Debug image previews currently expose shape/metadata placeholders; encoded preview image streaming remains a future improvement.
 
 Next recommended task:
 
-- Start Phase 4 by extending config loading and validation for `pipeline_graph`, including global defaults and per-camera overrides.
+- Start Phase 12 end-to-end scenario wiring with a fixture video or test camera config, then decide the real person detection model strategy.
 
 Validation last run:
 
-- `.venv/bin/ruff format src/nvr_common/pipeline tests`
-- `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`
-- `.venv/bin/python -m compileall nvr.py src tests`
+- `PYTHONPATH=src .venv/bin/python -m unittest discover`
+- `.venv/bin/python -m compileall nvr.py src`
 - `.venv/bin/ruff check .`
+- `npm run type-check` from `src/nvr_ui`
+- `.venv/bin/python -m json.tool .vscode/launch.json`
+- `.venv/bin/python -m json.tool .vscode/tasks.json`

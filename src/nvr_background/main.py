@@ -3,6 +3,7 @@ import threading
 import time
 from pathlib import Path
 
+from nvr_background.pipeline.camera_pipeline_worker import CameraPipelineWorker
 from nvr_background.recorder.camera_recorder import CameraRecorder
 from nvr_background.recorder.retention_manager import RetentionManager
 from nvr_common.config import Config
@@ -36,6 +37,7 @@ def main() -> None:
 
     cameras = conf.get("cameras") or []
     recorders = []
+    pipeline_workers = []
 
     # Start one CameraRecorder thread per enabled camera
     for camera in cameras:
@@ -47,6 +49,13 @@ def main() -> None:
 
         # Add to recorders
         recorders.append(rec)
+
+        if camera.get(Config.KEY_CAMERA_ENABLED, False) and conf.get_pipeline_graph(
+            camera["id"]
+        ):
+            pipeline_worker = CameraPipelineWorker(camera["id"], logger=logger)
+            pipeline_worker.start()
+            pipeline_workers.append(pipeline_worker)
 
     # Start retention manager
     retention_manager = RetentionManager()
@@ -70,9 +79,13 @@ def main() -> None:
     retention_manager.stop()
     for rec in recorders:
         rec.stop()
+    for pipeline_worker in pipeline_workers:
+        pipeline_worker.stop()
 
     retention_manager.join()
     for rec in recorders:
         rec.join()
+    for pipeline_worker in pipeline_workers:
+        pipeline_worker.join()
 
     logger.info("All stopped")
