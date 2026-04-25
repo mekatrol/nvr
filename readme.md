@@ -73,7 +73,7 @@ password=!MyPassword111
 chmod 600 ~/.smbcredentials
 ```
 
-#### from a PowerShell pront
+#### from a PowerShell prompt
 
 ```powershell
 wsl --shutdown
