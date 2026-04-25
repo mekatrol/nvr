@@ -1,0 +1,2 @@
+class PipelineValidationError(ValueError):
+    pass

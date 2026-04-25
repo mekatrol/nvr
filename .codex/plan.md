@@ -27,12 +27,13 @@ The target scenario is monitoring a camera for a person approaching in a configu
 
 ## Current Status
 
-Status: Phase 2 complete; Phase 3 pending
+Status: Phase 3 complete; Phase 4 pending
 
 The repository has been restructured into a `src` layout. Phase 2 discovery chose
 a separate sampled frame acquisition path for initial pipeline input, leaving the
-existing ffmpeg recording subprocess untouched. No pipeline implementation has
-started yet.
+existing ffmpeg recording subprocess untouched. Core pipeline graph interfaces,
+validation, dynamic stage loading, and synthetic-frame execution now exist under
+`src/nvr_common/pipeline`.
 
 ## Key Design Decisions
 
@@ -49,8 +50,8 @@ started yet.
   Notes: Confirm exact package name and dependency strategy before implementation, likely `opencv-python-headless` for service use unless UI/local display requirements force otherwise.
 
 - Decision: Pipeline modules are normal Python modules loaded through configuration.
-  Status: proposed
-  Notes: Define a small plugin contract before writing sample modules.
+  Status: accepted
+  Notes: `PipelineStageLoader` imports the configured module and class name, instantiates the class with its config dictionary, and expects a `process(context)` method returning `PipelineStageResult`.
 
 - Decision: The processing system is a graph of named pipelines, not only one linear pipeline.
   Status: accepted
@@ -301,29 +302,38 @@ Milestone test:
 
 ### Phase 3: Core Pipeline Interfaces
 
-Status: pending
+Status: complete
 
 Purpose: Add the backend abstractions for graph-based image and metadata flow without connecting to live cameras yet.
 
 Tasks:
 
-- [ ] Add a pipeline package with one top-level class per file.
-- [ ] Define named pipeline, graph, edge, input, context, output, and result data structures.
-- [ ] Define the plugin stage contract.
-- [ ] Implement stage loading from Python module and class names.
-- [ ] Implement enabled/disabled stage skipping.
-- [ ] Implement graph validation for duplicate pipeline ids, unknown edge references, and cycles.
-- [ ] Implement fan-out from one pipeline output to multiple downstream pipelines.
-- [ ] Implement basic fan-in where one pipeline receives outputs from multiple upstream pipelines for the same frame.
-- [ ] Ensure original image and current branch image are both available to every stage.
-- [ ] Ensure branch metadata is isolated unless a stage explicitly combines upstream metadata.
-- [ ] Add focused unit tests using synthetic images.
+- [x] Add a pipeline package with one top-level class per file.
+- [x] Define named pipeline, graph, edge, input, context, output, and result data structures.
+- [x] Define the plugin stage contract.
+- [x] Implement stage loading from Python module and class names.
+- [x] Implement enabled/disabled stage skipping.
+- [x] Implement graph validation for duplicate pipeline ids, unknown edge references, and cycles.
+- [x] Implement fan-out from one pipeline output to multiple downstream pipelines.
+- [x] Implement basic fan-in where one pipeline receives outputs from multiple upstream pipelines for the same frame.
+- [x] Ensure original image and current branch image are both available to every stage.
+- [x] Ensure branch metadata is isolated unless a stage explicitly combines upstream metadata.
+- [x] Add focused unit tests using synthetic images.
+
+Implementation notes:
+
+- Added `src/nvr_common/pipeline` with shared graph primitives, pipeline input/output/context objects, stage result objects, a plugin protocol, dynamic stage loading, graph validation, and a synchronous graph runner.
+- `PipelineGraph.validate()` rejects duplicate pipeline ids, duplicate stage ids within a pipeline, unknown edge endpoints, self-edges, and cycles.
+- `PipelineGraphRunner` starts at source pipelines, executes enabled stages in topological order, skips disabled stages, fans outputs to downstream pipelines, and runs fan-in pipelines once required upstream inputs for the frame are present.
+- Fan-out downstream inputs receive deep-copied metadata so branch stages do not mutate sibling branch metadata.
+- Fan-in pipelines receive all upstream inputs through `PipelineContext.upstream_inputs`. Their starting metadata is empty so metadata conflicts must be resolved explicitly by a combining stage.
+- Tests use standard-library `unittest` and synthetic string images to keep Phase 3 independent from OpenCV.
 
 Milestone test:
 
-- [ ] Run unit tests for the pipeline package.
-- [ ] Run the updated compileall command for the `src` layout.
-- [ ] Run `.venv/bin/ruff check .`.
+- [x] Run unit tests for the pipeline package.
+- [x] Run the updated compileall command for the `src` layout.
+- [x] Run `.venv/bin/ruff check .`.
 
 ### Phase 4: Configuration Support
 
@@ -533,13 +543,12 @@ Last updated: 2026-04-25
 
 Completed this session:
 
-- Completed Phase 2 discovery.
-- Read `.codex/environment.md`, `.codex/architecture.md`, `.codex/plan.md`, `AGENTS.md`, `nvr.py`, `src/nvr_background/main.py`, `src/nvr_common/config.py`, `src/nvr_background/recorder/camera_recorder.py`, and `src/nvr_background/recorder/retention_manager.py`.
-- Chose a separate sampled frame acquisition path for initial pipeline input.
-- Chose global pipeline defaults with per-camera overrides.
-- Chose directed acyclic graph validation for the initial implementation.
-- Chose required same-frame upstream outputs for initial fan-in behavior.
-- Documented the integration point and Phase 2 decisions in this plan.
+- Completed Phase 3 core pipeline interfaces.
+- Added `src/nvr_common/pipeline` data structures and graph runner.
+- Added dynamic stage loading from Python module and class names.
+- Added validation for duplicate pipeline ids, duplicate stage ids, unknown edge references, self-edges, and cycles.
+- Added stage skipping, fan-out execution, required-input fan-in execution, original-image access, and metadata isolation behavior.
+- Added `unittest` coverage using synthetic images and local test plugin stages.
 
 Current blockers:
 
@@ -547,8 +556,11 @@ Current blockers:
 
 Next recommended task:
 
-- Start Phase 3 by adding the core pipeline interfaces and graph validation in `src/nvr_common`.
+- Start Phase 4 by extending config loading and validation for `pipeline_graph`, including global defaults and per-camera overrides.
 
 Validation last run:
 
-- Not run this session because only `.codex/plan.md` changed.
+- `.venv/bin/ruff format src/nvr_common/pipeline tests`
+- `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`
+- `.venv/bin/python -m compileall nvr.py src tests`
+- `.venv/bin/ruff check .`

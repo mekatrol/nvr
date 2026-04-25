@@ -218,3 +218,4 @@ config.debug.yaml
 /src/nvr_ui/__screenshots__/
 /src/nvr_ui/cypress/videos/
 /src/nvr_ui/cypress/screenshots/
+src/nvr_web/web/
