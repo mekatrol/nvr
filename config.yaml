@@ -21,7 +21,7 @@ pipeline_graph:
       stages:
         - id: example-disabled-crop
           enabled: false
-          module: nvr_common.pipeline.sample_stages.crop
+          module: nvr_common.pipeline.sample_stages.crop_stage
           class: CropStage
           config:
             x: 0
@@ -34,8 +34,8 @@ pipeline_graph:
       stages:
         - id: example-disabled-thumbnail
           enabled: false
-          module: nvr_common.pipeline.sample_stages.thumbnail
-          class: ThumbnailStage
+          module: nvr_common.pipeline.sample_stages.resize_stage
+          class: ResizeStage
           config:
             width: 320
 

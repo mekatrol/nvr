@@ -27,13 +27,14 @@ The target scenario is monitoring a camera for a person approaching in a configu
 
 ## Current Status
 
-Status: Phase 4 complete; Phase 5 pending
+Status: Phase 5 complete; Phase 6 pending
 
 The repository has been restructured into a `src` layout. Phase 2 discovery chose
 a separate sampled frame acquisition path for initial pipeline input, leaving the
 existing ffmpeg recording subprocess untouched. Core pipeline graph interfaces,
-validation, dynamic stage loading, synthetic-frame execution, and YAML
-configuration parsing now exist under `src/nvr_common`.
+validation, dynamic stage loading, synthetic-frame execution, YAML
+configuration parsing, and OpenCV-backed sample stages now exist under
+`src/nvr_common`.
 
 ## Key Design Decisions
 
@@ -46,8 +47,8 @@ configuration parsing now exist under `src/nvr_common`.
   Notes: `src/nvr_web` is the Python backend/API package. `src/nvr_ui` is the Vue 3 TypeScript Vite SPA with its own `package.json`, `package-lock.json`, and frontend toolchain.
 
 - Decision: Use OpenCV as the likely image processing foundation.
-  Status: proposed
-  Notes: Confirm exact package name and dependency strategy before implementation, likely `opencv-python-headless` for service use unless UI/local display requirements force otherwise.
+  Status: accepted
+  Notes: Phase 5 added `opencv-python-headless` for service-side image processing without GUI dependencies.
 
 - Decision: Pipeline modules are normal Python modules loaded through configuration.
   Status: accepted
@@ -375,25 +376,42 @@ Validation results:
 
 ### Phase 5: OpenCV Dependency and Sample Stages
 
-Status: pending
+Status: complete
 
 Purpose: Prove the pipeline can transform images with OpenCV.
 
 Tasks:
 
-- [ ] Choose and add the OpenCV package dependency.
-- [ ] Add a simple clip/crop stage.
-- [ ] Add a simple resize or grayscale stage.
-- [ ] Add a metadata annotation stage for testing metadata flow.
-- [ ] Add tests using generated images.
-- [ ] Confirm disabled sample stages are skipped.
-- [ ] Confirm a sample preprocessing pipeline can fan out into object detection and thumbnail pipelines.
-- [ ] Confirm a sample post-processing pipeline can receive outputs from two upstream pipelines.
+- [x] Choose and add the OpenCV package dependency.
+- [x] Add a simple clip/crop stage.
+- [x] Add a simple resize or grayscale stage.
+- [x] Add a metadata annotation stage for testing metadata flow.
+- [x] Add tests using generated images.
+- [x] Confirm disabled sample stages are skipped.
+- [x] Confirm a sample preprocessing pipeline can fan out into object detection and thumbnail pipelines.
+- [x] Confirm a sample post-processing pipeline can receive outputs from two upstream pipelines.
+
+Implementation notes:
+
+- Added `opencv-python-headless` to `requirements.txt` and installed it in the local virtual environment for validation.
+- Added sample stage modules under `src/nvr_common/pipeline/sample_stages`: `CropStage`, `ResizeStage`, and `MetadataAnnotationStage`.
+- `CropStage` crops NumPy/OpenCV image arrays using configured `x`, `y`, `width`, and `height`, clipping to image bounds and emitting crop metadata.
+- `ResizeStage` resizes images with OpenCV and can preserve aspect ratio when only width is configured.
+- `MetadataAnnotationStage` adds configured metadata and can record current image shape and upstream input ids for debugging and tests.
+- Updated the disabled sample stage module paths in `config.yaml` to point at the new sample stage modules.
+- Added generated-image tests for crop, resize, disabled-stage skipping, fan-out into object detection and thumbnail branches, and fan-in into a post-processing pipeline.
 
 Milestone test:
 
-- [ ] Run sample-stage tests.
-- [ ] Run compileall and Ruff.
+- [x] Run sample-stage tests.
+- [x] Run compileall and Ruff.
+
+Validation results:
+
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest tests.test_sample_pipeline_stages`
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest discover`
+- [x] `.venv/bin/python -m compileall nvr.py src`
+- [x] `.venv/bin/ruff check .`
 
 ### Phase 6: Camera Integration Prototype
 
