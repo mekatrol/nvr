@@ -12,9 +12,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from log.rtsp_sanitizing_filter import RtspSanitizingFilter
-from utils.config import Config
-from utils.singleton import Singleton
+from nvr_common.config import Config
+from nvr_common.logging.rtsp_sanitizing_filter import RtspSanitizingFilter
+from nvr_common.singleton import Singleton
 
 
 class Logger(Singleton):
@@ -22,7 +22,7 @@ class Logger(Singleton):
     Singleton wrapper around a configured logging.Logger instance.
 
     Usage:
-        from utils.logger import Logger
+        from nvr_common.logging.logger import Logger
 
         log = Logger().logger
         log.info("Application started")

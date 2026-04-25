@@ -6,9 +6,9 @@ import threading
 import time
 from typing import List, Tuple, Optional
 
-from utils.config import Config
-from log.logger import Logger
-from log.rtsp_sanitizing_filter import sanitize_rtsp_url
+from nvr_common.config import Config
+from nvr_common.logging.logger import Logger
+from nvr_common.logging.rtsp_sanitizing_filter import sanitize_rtsp_url
 
 
 class CameraRecorder(threading.Thread):

@@ -1,4 +1,5 @@
 [tool.ruff]
+src = ["src"]
 lint.ignore = ["F541"]
 
 [tool.ruff.format]

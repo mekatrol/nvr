@@ -4,8 +4,8 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from log.logger import Logger
-from utils.config import Config
+from nvr_common.config import Config
+from nvr_common.logging.logger import Logger
 
 
 class RetentionManager(threading.Thread):

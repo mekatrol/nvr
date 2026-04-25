@@ -5,7 +5,7 @@ from pathlib import Path
 from collections.abc import MutableMapping
 from typing import Any, Dict, Iterator, List, Set
 from urllib.parse import urlparse
-from utils.singleton import Singleton
+from nvr_common.singleton import Singleton
 
 
 class Config(Singleton, MutableMapping):

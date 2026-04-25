@@ -8,11 +8,14 @@ Key entry point:
 - `nvr.py` starts config loading, logging, camera recorder threads, retention management, and signal handling.
 
 Core modules:
-- `utils/config.py` loads `config.yaml`, overlays optional `config.debug.yaml`, expands RTSP credential placeholders from environment variables, and validates config.
-- `log/logger.py` configures the singleton application logger.
-- `log/rtsp_sanitizing_filter.py` removes RTSP credentials from log output.
-- `recorder/camera_recorder.py` builds and supervises each `ffmpeg` recorder process.
-- `recorder/retention_manager.py` moves old `.mp4` segments to backup storage and deletes expired backups.
+- `src/nvr_background/main.py` owns background service startup, signal handling, recorder threads, and retention startup.
+- `src/nvr_common/config.py` loads `config.yaml`, overlays optional `config.debug.yaml`, expands RTSP credential placeholders from environment variables, and validates config.
+- `src/nvr_common/logging/logger.py` configures the singleton application logger.
+- `src/nvr_common/logging/rtsp_sanitizing_filter.py` removes RTSP credentials from log output.
+- `src/nvr_background/recorder/camera_recorder.py` builds and supervises each `ffmpeg` recorder process.
+- `src/nvr_background/recorder/retention_manager.py` moves old `.mp4` segments to backup storage and deletes expired backups.
+- `src/nvr_web` is reserved for future web/API work.
+- `src/nvr_ui` is the Vue 3 TypeScript Vite SPA subproject for the future debugger UI.
 
 ## Local Environment
 
@@ -52,7 +55,7 @@ Do not commit real credentials, camera passwords, SMB credentials, or generated 
 Fast syntax check:
 
 ```bash
-.venv/bin/python -m compileall nvr.py utils log recorder
+.venv/bin/python -m compileall nvr.py src
 ```
 
 Lint:

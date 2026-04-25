@@ -8,17 +8,25 @@ This allows reusable function groups such as preprocessing, object detection, th
 
 ## Repository Layout Direction
 
-Before implementing the pipeline graph, restructure the codebase into a `src` layout that separates background processes from web/API code.
+Before implementing the pipeline graph, restructure the codebase into a `src` layout that separates background processes, shared Python code, the Python web/API backend, and the Vue debugger SPA.
 
 The target separation is:
 
 - background process package: service startup, recorder lifecycle, retention management, frame acquisition, and graph runner lifecycle
 - common package: configuration, logging, RTSP sanitizing, shared models, and pipeline graph primitives that are used by both background and web/API code
-- web/API package: future debug API, debug session endpoints, image preview endpoints, and web server integration
+- Python web/API package: future debug API, debug session endpoints, image preview endpoints, and web server integration
+- Vue SPA subproject: browser UI for the pipeline debugger, built with Vue 3, TypeScript, and Vite
 
-The exact package names should be decided during the first implementation phase. Acceptable directions include either separate packages such as `nvr_background`, `nvr_common`, and `nvr_web`, or one package such as `nvr` with `background`, `common`, and `web` subpackages.
+The chosen layout is:
+
+- `src/nvr_background`: Python background service package for service startup, recorder lifecycle, retention management, frame acquisition, and graph runner lifecycle.
+- `src/nvr_common`: Python shared package for configuration, logging, RTSP sanitizing, shared models, and pipeline graph primitives used by both background and web/API code.
+- `src/nvr_web`: Python web/API backend package for future debugger endpoints and web server integration.
+- `src/nvr_ui`: Vue 3 TypeScript Vite SPA subproject for the debugger UI. This directory is not a Python package and should be treated as a Node/Vite project with its own `package.json`, lockfile, scripts, and ignore rules.
 
 Keep the root entry point thin after the move. It should only delegate to the background service entry point or be replaced by a documented module entry point.
+
+The Python backend and Vue SPA should remain separate codebases even though they both live under `src`. The backend owns HTTP/WebSocket APIs and any static-file serving integration. The SPA owns browser routes, debugger screens, client-side state, and API calls to `nvr_web`.
 
 ## Core Model
 

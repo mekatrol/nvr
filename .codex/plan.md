@@ -18,24 +18,28 @@ The target scenario is monitoring a camera for a person approaching in a configu
 - Do not run `.venv/bin/python nvr.py` as routine validation because it launches camera and `ffmpeg` work.
 - Use the repository virtual environment when running Python checks.
 - Validate Python changes with:
-  - `.venv/bin/python -m compileall nvr.py utils log recorder`
+  - `.venv/bin/python -m compileall nvr.py src`
   - `.venv/bin/ruff check .`
 - After the `src` restructure is complete, update `.codex/environment.md`, this plan, and validation commands to use the new paths.
 - Preserve RTSP credential redaction in all logging paths.
 - Do not commit or write real camera credentials, MQTT credentials, generated recordings, or generated debug captures.
-- When frontend work begins, the Vue app will be created manually by the user with `npm create vue@latest`. Do not scaffold it before the user confirms that step is done.
+- The Vue app has been manually created by the user under `src/nvr_ui`. Treat it as a Vite SPA subproject, not as Python package code.
 
 ## Current Status
 
-Status: planning
+Status: Phase 1 complete; Phase 2 pending
 
-No pipeline implementation has started yet.
+The repository has been restructured into a `src` layout. No pipeline implementation has started yet.
 
 ## Key Design Decisions
 
 - Decision: Restructure the codebase into a `src` layout before adding pipeline features.
-  Status: proposed
-  Notes: Separate long-running background service code from web/API code so the pipeline executor, debug backend, and future Vue UI have clear ownership boundaries.
+  Status: accepted
+  Notes: Current layout uses Python packages `nvr_background`, `nvr_common`, and `nvr_web`, plus the Vue SPA subproject at `src/nvr_ui`.
+
+- Decision: Keep the web backend and Vue SPA as separate codebases.
+  Status: accepted
+  Notes: `src/nvr_web` is the Python backend/API package. `src/nvr_ui` is the Vue 3 TypeScript Vite SPA with its own `package.json`, `package-lock.json`, and frontend toolchain.
 
 - Decision: Use OpenCV as the likely image processing foundation.
   Status: proposed
@@ -63,8 +67,6 @@ No pipeline implementation has started yet.
 
 ## Open Questions
 
-- What exact package names should be used under `src`: for example `src/nvr_background`, `src/nvr_web`, and `src/nvr_common`, or a single `src/nvr` package with `background`, `web`, and `common` subpackages?
-- Should the root `nvr.py` remain as a compatibility launcher, or should the main command move to a module entry point such as `.venv/bin/python -m nvr.background`?
 - Should the pipeline run on live frames, completed MP4 segments, snapshots extracted from `ffmpeg`, or a separate camera frame reader?
 - What frame rate should the pipeline process for detection: every frame, every Nth frame, or time-based sampling?
 - Should processed images be persisted for debugging, kept in memory, or both?
@@ -210,7 +212,7 @@ pipeline_graph:
 
 ### Phase 1: Restructure Into `src`
 
-Status: pending
+Status: complete
 
 Purpose: Move the current Python code into a `src` layout and create clear boundaries between background processes, common/shared code, and future web/API code before adding the pipeline graph.
 
@@ -223,23 +225,31 @@ Target direction:
 
 Tasks:
 
-- [ ] Read current imports and entry points in `nvr.py`, `utils`, `log`, and `recorder`.
-- [ ] Choose the concrete `src` package layout.
-- [ ] Move current background service modules under `src`.
-- [ ] Separate shared modules from background-only modules.
-- [ ] Reserve a web/API package path for later debug API work without implementing the API yet.
-- [ ] Update imports after the move.
-- [ ] Update `pyproject.toml` if needed so Ruff and tests understand the new source layout.
-- [ ] Update validation commands in `.codex/environment.md`, `AGENTS.md` if appropriate, and this plan.
-- [ ] Keep `nvr.py` as a thin launcher or replace it with a documented module entry point.
-- [ ] Add or update smoke tests for importability if a test framework exists.
-- [ ] Update this file with the final chosen layout.
+- [x] Read current imports and entry points in `nvr.py`, `utils`, `log`, and `recorder`.
+- [x] Choose the concrete `src` package layout.
+- [x] Move current background service modules under `src`.
+- [x] Separate shared modules from background-only modules.
+- [x] Reserve a web/API package path for later debug API work without implementing the API yet.
+- [x] Update imports after the move.
+- [x] Update `pyproject.toml` if needed so Ruff and tests understand the new source layout.
+- [x] Update validation commands in `.codex/environment.md`, `AGENTS.md` if appropriate, and this plan.
+- [x] Keep `nvr.py` as a thin launcher or replace it with a documented module entry point.
+- [x] Add or update smoke tests for importability if a test framework exists.
+- [x] Update this file with the final chosen layout.
+
+Final layout:
+
+- `nvr.py`: compatibility launcher that adds `src` to `sys.path` and delegates to `nvr_background.main`.
+- `src/nvr_background`: background service package, including recorder and retention lifecycle code.
+- `src/nvr_common`: shared configuration, singleton, and logging code.
+- `src/nvr_web`: reserved Python package for future debug API and web integration.
+- `src/nvr_ui`: Vue 3 TypeScript Vite SPA subproject for the future debugger UI.
 
 Milestone test:
 
-- [ ] Run the updated compileall command for the new `src` paths.
-- [ ] Run `.venv/bin/ruff check .`.
-- [ ] Do not run the service unless explicitly requested.
+- [x] Run the updated compileall command for the new `src` paths.
+- [x] Run `.venv/bin/ruff check .`.
+- [x] Do not run the service unless explicitly requested.
 
 ### Phase 2: Discovery and Shape
 
@@ -440,19 +450,19 @@ Milestone test:
 
 - [ ] Run API tests.
 - [ ] Run compileall and Ruff.
-- [ ] Manual UI testing deferred until frontend exists.
+- [ ] Manual UI testing deferred until frontend screens are implemented.
 
 ### Phase 11: Vue Debugger Subproject
 
-Status: blocked
+Status: pending
 
-Blocker: The user will manually create the Vue 3 Composition API, strict TypeScript, Vite subproject with `npm create vue@latest`.
+Note: The user manually created the Vue 3 TypeScript Vite subproject at `src/nvr_ui`.
 
 Purpose: Build the visual debugger once the backend API exists and the frontend project has been created.
 
 Tasks:
 
-- [ ] Wait for user confirmation that the Vue subproject has been created.
+- [x] Wait for user confirmation that the Vue subproject has been created.
 - [ ] Read the generated frontend structure and package scripts.
 - [ ] Build a debugger view with camera selection, stage list, breakpoints, controls, image previews, and metadata panel.
 - [ ] Use Vue 3 Composition API and strict TypeScript.
@@ -496,22 +506,27 @@ Last updated: 2026-04-25
 
 Completed this session:
 
-- Created this phased plan.
-- Added graph-based named pipeline architecture to the plan.
-- Added `.codex/architecture.md`.
-- Added Phase 1 for restructuring the codebase into a `src` layout before pipeline work.
-- Updated `.codex/architecture.md` with background/common/web layout direction.
+- Completed Phase 1 `src` restructuring.
+- Chose separate Python package layout: `src/nvr_background`, `src/nvr_common`, and `src/nvr_web`.
+- Moved recorder lifecycle and retention code into `nvr_background`.
+- Moved config, singleton, and logging code into `nvr_common`.
+- Added reserved Python `nvr_web` package.
+- Recorded user-created Vue SPA subproject at `src/nvr_ui`.
+- Added root `.gitignore` guards for `src/nvr_ui` generated files.
+- Kept root `nvr.py` as a thin compatibility launcher.
+- Updated validation commands in `.codex/environment.md`, `AGENTS.md`, and this plan.
 
 Current blockers:
 
-- Need Phase 1 `src` restructure before pipeline implementation.
 - Need Phase 2 discovery before implementation choices are finalized.
-- Vue frontend is blocked until the user manually creates the subproject.
+- Frontend implementation should wait until backend debugger APIs exist.
 
 Next recommended task:
 
-- Start Phase 1 by restructuring the codebase into `src` and separating background, common, and future web/API code.
+- Start Phase 2 discovery by reading the restructured service entry point, config module, camera recorder, and retention manager, then choose the pipeline integration point.
 
 Validation last run:
 
-- Not run. This session only added planning documentation.
+- `.venv/bin/python -m compileall nvr.py src`
+- `.venv/bin/ruff check .`
+- `PYTHONPATH=src .venv/bin/python -c "import nvr_background.main; import nvr_common.config; import nvr_web"`

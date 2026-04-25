@@ -206,3 +206,15 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 config.debug.yaml
+
+# Vue SPA generated files
+/src/nvr_ui/node_modules/
+/src/nvr_ui/dist/
+/src/nvr_ui/dist-ssr/
+/src/nvr_ui/coverage/
+/src/nvr_ui/*.local
+/src/nvr_ui/*.tsbuildinfo
+/src/nvr_ui/.eslintcache
+/src/nvr_ui/__screenshots__/
+/src/nvr_ui/cypress/videos/
+/src/nvr_ui/cypress/screenshots/
