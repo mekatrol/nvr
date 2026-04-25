@@ -392,8 +392,8 @@ class Config(Singleton, MutableMapping):
                 self.KEY_STREAM_SEGMENT_SECONDS
             )
 
-            # Default to 5 minutes
-            self.stream_segment_seconds = stream_segment_seconds = 5 * 50
+            # Default to 5 minutes when the value is missing or invalid
+            self.stream_segment_seconds = 5 * 60
 
             if self._validate_int(
                 stream_segment_seconds,
