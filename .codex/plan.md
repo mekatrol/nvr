@@ -27,13 +27,13 @@ The target scenario is monitoring a camera for a person approaching in a configu
 
 ## Current Status
 
-Status: Phase 3 complete; Phase 4 pending
+Status: Phase 4 complete; Phase 5 pending
 
 The repository has been restructured into a `src` layout. Phase 2 discovery chose
 a separate sampled frame acquisition path for initial pipeline input, leaving the
 existing ffmpeg recording subprocess untouched. Core pipeline graph interfaces,
-validation, dynamic stage loading, and synthetic-frame execution now exist under
-`src/nvr_common/pipeline`.
+validation, dynamic stage loading, synthetic-frame execution, and YAML
+configuration parsing now exist under `src/nvr_common`.
 
 ## Key Design Decisions
 
@@ -337,26 +337,41 @@ Milestone test:
 
 ### Phase 4: Configuration Support
 
-Status: pending
+Status: complete
 
 Purpose: Extend config loading and validation for pipeline settings.
 
 Tasks:
 
-- [ ] Add pipeline config parsing.
-- [ ] Support global defaults and per-camera overrides if selected in Phase 2.
-- [ ] Validate required pipeline fields: `id`, `enabled`, and `stages`.
-- [ ] Validate required edge fields: `from` and `to`.
-- [ ] Validate required stage fields: `id`, `enabled`, `module`, and class or factory reference.
-- [ ] Validate stage config remains a dictionary.
-- [ ] Validate fan-in input requirements for pipelines with multiple upstream edges.
-- [ ] Add example disabled stages to `config.yaml` without real credentials.
-- [ ] Add tests for config merge behavior, including `config.debug.yaml` overlays.
+- [x] Add pipeline config parsing.
+- [x] Support global defaults and per-camera overrides if selected in Phase 2.
+- [x] Validate required pipeline fields: `id`, `enabled`, and `stages`.
+- [x] Validate required edge fields: `from` and `to`.
+- [x] Validate required stage fields: `id`, `enabled`, `module`, and class or factory reference.
+- [x] Validate stage config remains a dictionary.
+- [x] Validate fan-in input requirements for pipelines with multiple upstream edges.
+- [x] Add example disabled stages to `config.yaml` without real credentials.
+- [x] Add tests for config merge behavior, including `config.debug.yaml` overlays.
+
+Implementation notes:
+
+- Added `Config.get_pipeline_graph_config()`, `Config.get_pipeline_graph()`, and `Config.get_pipeline_frame_interval_seconds()` for global and per-camera pipeline configuration access.
+- Pipeline graph overrides merge by pipeline `id`, and stage overrides merge by stage `id`, so camera-level config can disable or customize a shared stage without duplicating the whole graph.
+- YAML validation now checks required pipeline, edge, and stage fields; stage config mapping shape; graph references and cycles through `PipelineGraph.validate()`; and explicit `inputs.required` entries for fan-in pipelines with multiple upstream edges.
+- `config.debug.yaml` overlays use the same merge behavior as camera overrides.
+- `config.yaml` now includes a disabled example pipeline graph with placeholder sample stage module paths and no real credentials.
 
 Milestone test:
 
-- [ ] Run config tests.
-- [ ] Run compileall and Ruff.
+- [x] Run config tests.
+- [x] Run compileall and Ruff.
+
+Validation results:
+
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest tests.test_config_pipeline_graph`
+- [x] `PYTHONPATH=src .venv/bin/python -m unittest discover`
+- [x] `.venv/bin/python -m compileall nvr.py src`
+- [x] `.venv/bin/ruff check .`
 
 ### Phase 5: OpenCV Dependency and Sample Stages
 

@@ -5,6 +5,13 @@ from pathlib import Path
 from collections.abc import MutableMapping
 from typing import Any, Dict, Iterator, List, Set
 from urllib.parse import urlparse
+from nvr_common.pipeline import (
+    NamedPipeline,
+    PipelineEdge,
+    PipelineGraph,
+    PipelineStageConfig,
+    PipelineValidationError,
+)
 from nvr_common.singleton import Singleton
 
 
@@ -24,6 +31,24 @@ class Config(Singleton, MutableMapping):
     KEY_CAMERA_ENABLED: str = "enabled"
     KEY_CAMERA_RTSP_URL: str = "rtsp_url"
     KEY_CAMERA_LOG_FFMPEG: str = "log_ffmpeg"
+    KEY_PIPELINE_GRAPH: str = "pipeline_graph"
+    KEY_PIPELINE_GRAPH_ENABLED: str = "enabled"
+    KEY_PIPELINE_FRAME_INTERVAL_SECONDS: str = "frame_interval_seconds"
+    KEY_PIPELINES: str = "pipelines"
+    KEY_PIPELINE_ID: str = "id"
+    KEY_PIPELINE_ENABLED: str = "enabled"
+    KEY_PIPELINE_STAGES: str = "stages"
+    KEY_PIPELINE_INPUTS: str = "inputs"
+    KEY_PIPELINE_INPUTS_REQUIRED: str = "required"
+    KEY_PIPELINE_EDGES: str = "edges"
+    KEY_PIPELINE_EDGE_FROM: str = "from"
+    KEY_PIPELINE_EDGE_TO: str = "to"
+    KEY_STAGE_ID: str = "id"
+    KEY_STAGE_ENABLED: str = "enabled"
+    KEY_STAGE_MODULE: str = "module"
+    KEY_STAGE_CLASS: str = "class"
+    KEY_STAGE_CLASS_NAME: str = "class_name"
+    KEY_STAGE_CONFIG: str = "config"
 
     stream_output_path = None
     stream_retention_days = 1
@@ -72,6 +97,38 @@ class Config(Singleton, MutableMapping):
 
     def get_camera(self, camera_id: str) -> Dict[str, Any]:
         return self.cameras_by_id[camera_id]
+
+    def get_pipeline_graph_config(
+        self, camera_id: str | None = None
+    ) -> Dict[str, Any] | None:
+        pipeline_graph = self._conf.get(self.KEY_PIPELINE_GRAPH)
+
+        if camera_id is not None:
+            camera = self.get_camera(camera_id)
+            camera_pipeline_graph = camera.get(self.KEY_PIPELINE_GRAPH)
+            if camera_pipeline_graph is not None:
+                pipeline_graph = self._merge_pipeline_graph_dict(
+                    pipeline_graph, camera_pipeline_graph
+                )
+
+        return pipeline_graph if isinstance(pipeline_graph, dict) else None
+
+    def get_pipeline_graph(self, camera_id: str | None = None) -> PipelineGraph | None:
+        pipeline_graph = self.get_pipeline_graph_config(camera_id)
+        if not pipeline_graph:
+            return None
+        if pipeline_graph.get(self.KEY_PIPELINE_GRAPH_ENABLED) is False:
+            return None
+        return self._parse_pipeline_graph(pipeline_graph)
+
+    def get_pipeline_frame_interval_seconds(
+        self, camera_id: str | None = None
+    ) -> float | None:
+        pipeline_graph = self.get_pipeline_graph_config(camera_id)
+        if not pipeline_graph:
+            return None
+        value = pipeline_graph.get(self.KEY_PIPELINE_FRAME_INTERVAL_SECONDS)
+        return float(value) if isinstance(value, (int, float)) else None
 
     def log_config(self, logger: logging.Logger | None = None) -> None:
         """
@@ -238,6 +295,15 @@ class Config(Singleton, MutableMapping):
                 ):
                     result[key] = Config._merge_stream_dict(base_value, override_value)
 
+                elif (
+                    key == Config.KEY_PIPELINE_GRAPH
+                    and isinstance(base_value, dict)
+                    and isinstance(override_value, dict)
+                ):
+                    result[key] = Config._merge_pipeline_graph_dict(
+                        base_value, override_value
+                    )
+
                 else:
                     # Generic recursive merge
                     result[key] = Config._merge_dicts(base_value, override_value)
@@ -246,6 +312,115 @@ class Config(Singleton, MutableMapping):
 
         # For non-dicts, overrides completely replace base
         return overrides
+
+    @staticmethod
+    def _merge_pipeline_graph_dict(
+        base_graph: Any, override_graph: Any
+    ) -> dict[str, Any]:
+        if not isinstance(base_graph, dict):
+            base_graph = {}
+        if not isinstance(override_graph, dict):
+            return dict(base_graph)
+
+        result = dict(base_graph)
+        for key, override_value in override_graph.items():
+            base_value = base_graph.get(key)
+            if (
+                key == Config.KEY_PIPELINES
+                and isinstance(base_value, list)
+                and isinstance(override_value, list)
+            ):
+                result[key] = Config._merge_pipeline_list(base_value, override_value)
+            else:
+                result[key] = Config._merge_dicts(base_value, override_value)
+        return result
+
+    @staticmethod
+    def _merge_pipeline_list(
+        base_list: list[Any], override_list: list[Any]
+    ) -> list[Any]:
+        merged_by_id: dict[str, dict[str, Any]] = {}
+        invalid_entries: list[Any] = []
+
+        for pipeline in base_list:
+            if not isinstance(pipeline, dict):
+                invalid_entries.append(pipeline)
+                continue
+            pipeline_id = pipeline.get(Config.KEY_PIPELINE_ID)
+            if isinstance(pipeline_id, str):
+                merged_by_id[pipeline_id] = dict(pipeline)
+            else:
+                invalid_entries.append(dict(pipeline))
+
+        for override_pipeline in override_list:
+            if not isinstance(override_pipeline, dict):
+                invalid_entries.append(override_pipeline)
+                continue
+            pipeline_id = override_pipeline.get(Config.KEY_PIPELINE_ID)
+            if not isinstance(pipeline_id, str):
+                invalid_entries.append(dict(override_pipeline))
+                continue
+
+            if pipeline_id in merged_by_id:
+                merged_by_id[pipeline_id] = Config._merge_pipeline_dict(
+                    merged_by_id[pipeline_id], override_pipeline
+                )
+            else:
+                merged_by_id[pipeline_id] = dict(override_pipeline)
+
+        return [*merged_by_id.values(), *invalid_entries]
+
+    @staticmethod
+    def _merge_pipeline_dict(
+        base_pipeline: dict[str, Any], override_pipeline: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = dict(base_pipeline)
+        for key, override_value in override_pipeline.items():
+            base_value = base_pipeline.get(key)
+            if (
+                key == Config.KEY_PIPELINE_STAGES
+                and isinstance(base_value, list)
+                and isinstance(override_value, list)
+            ):
+                result[key] = Config._merge_stage_list(base_value, override_value)
+            else:
+                result[key] = Config._merge_dicts(base_value, override_value)
+        return result
+
+    @staticmethod
+    def _merge_stage_list(
+        base_list: list[Any], override_list: list[Any]
+    ) -> list[Any]:
+        merged_by_id: dict[str, dict[str, Any]] = {}
+        invalid_entries: list[Any] = []
+
+        for stage in base_list:
+            if not isinstance(stage, dict):
+                invalid_entries.append(stage)
+                continue
+            stage_id = stage.get(Config.KEY_STAGE_ID)
+            if isinstance(stage_id, str):
+                merged_by_id[stage_id] = dict(stage)
+            else:
+                invalid_entries.append(dict(stage))
+
+        for override_stage in override_list:
+            if not isinstance(override_stage, dict):
+                invalid_entries.append(override_stage)
+                continue
+            stage_id = override_stage.get(Config.KEY_STAGE_ID)
+            if not isinstance(stage_id, str):
+                invalid_entries.append(dict(override_stage))
+                continue
+
+            if stage_id in merged_by_id:
+                merged_by_id[stage_id] = Config._merge_dicts(
+                    merged_by_id[stage_id], override_stage
+                )
+            else:
+                merged_by_id[stage_id] = dict(override_stage)
+
+        return [*merged_by_id.values(), *invalid_entries]
 
     @staticmethod
     def _load_config(path: str) -> Dict[str, Any]:
@@ -476,6 +651,218 @@ class Config(Singleton, MutableMapping):
                             f"'log_ffmpeg' (must be true/false if present)"
                         )
 
+                if self.KEY_PIPELINE_GRAPH in camera:
+                    effective_pipeline_graph = self._merge_pipeline_graph_dict(
+                        self._conf.get(self.KEY_PIPELINE_GRAPH),
+                        camera.get(self.KEY_PIPELINE_GRAPH),
+                    )
+                    self._validate_pipeline_graph(
+                        effective_pipeline_graph,
+                        f"camera '{camera_id or index}' pipeline_graph",
+                        errors,
+                    )
+
+        if self.KEY_PIPELINE_GRAPH in self._conf:
+            self._validate_pipeline_graph(
+                self._conf.get(self.KEY_PIPELINE_GRAPH), "pipeline_graph", errors
+            )
+
         if errors:
             message = "Invalid configuration:\n- " + "\n- ".join(errors)
             raise ValueError(message)
+
+    def _validate_pipeline_graph(
+        self, raw_graph: Any, field_label: str, errors: List[str]
+    ) -> None:
+        if not isinstance(raw_graph, dict):
+            errors.append(f"{field_label} must be a dictionary value")
+            return
+
+        enabled = raw_graph.get(self.KEY_PIPELINE_GRAPH_ENABLED)
+        if not isinstance(enabled, bool):
+            errors.append(f"{field_label}->enabled must be true/false")
+
+        interval = raw_graph.get(self.KEY_PIPELINE_FRAME_INTERVAL_SECONDS)
+        if interval is not None:
+            self._validate_float(
+                interval,
+                f"{field_label}->frame_interval_seconds",
+                errors,
+                0,
+            )
+
+        if self.KEY_PIPELINES not in raw_graph:
+            errors.append(f"{field_label}->pipelines is required")
+            return
+        if self.KEY_PIPELINE_EDGES not in raw_graph:
+            errors.append(f"{field_label}->edges is required")
+            return
+
+        try:
+            graph = self._parse_pipeline_graph(raw_graph)
+        except ValueError as ex:
+            errors.append(f"{field_label}: {ex}")
+            return
+
+        try:
+            graph.validate()
+        except PipelineValidationError as ex:
+            errors.append(f"{field_label}: {ex}")
+            return
+
+        self._validate_fan_in_requirements(graph, field_label, errors)
+
+    @classmethod
+    def _parse_pipeline_graph(cls, raw_graph: dict[str, Any]) -> PipelineGraph:
+        raw_pipelines = raw_graph.get(cls.KEY_PIPELINES)
+        raw_edges = raw_graph.get(cls.KEY_PIPELINE_EDGES)
+        if not isinstance(raw_pipelines, list):
+            raise ValueError("pipelines must be a list")
+        if not isinstance(raw_edges, list):
+            raise ValueError("edges must be a list")
+
+        pipelines = tuple(
+            cls._parse_named_pipeline(raw_pipeline, index)
+            for index, raw_pipeline in enumerate(raw_pipelines)
+        )
+        edges = tuple(
+            cls._parse_pipeline_edge(raw_edge, index)
+            for index, raw_edge in enumerate(raw_edges)
+        )
+        return PipelineGraph(pipelines=pipelines, edges=edges)
+
+    @classmethod
+    def _parse_named_pipeline(cls, raw_pipeline: Any, index: int) -> NamedPipeline:
+        if not isinstance(raw_pipeline, dict):
+            raise ValueError(f"pipeline at index {index} must be a mapping")
+
+        pipeline_id = cls._required_non_empty_string(
+            raw_pipeline, cls.KEY_PIPELINE_ID, f"pipeline at index {index}"
+        )
+        enabled = cls._required_bool(
+            raw_pipeline, cls.KEY_PIPELINE_ENABLED, f"pipeline '{pipeline_id}'"
+        )
+        raw_stages = raw_pipeline.get(cls.KEY_PIPELINE_STAGES)
+        if not isinstance(raw_stages, list):
+            raise ValueError(f"pipeline '{pipeline_id}' stages must be a list")
+
+        required_inputs = cls._parse_required_inputs(raw_pipeline, pipeline_id)
+        stages = tuple(
+            cls._parse_stage(stage, stage_index, pipeline_id)
+            for stage_index, stage in enumerate(raw_stages)
+        )
+        return NamedPipeline(
+            id=pipeline_id,
+            stages=stages,
+            enabled=enabled,
+            required_inputs=required_inputs,
+        )
+
+    @classmethod
+    def _parse_required_inputs(
+        cls, raw_pipeline: dict[str, Any], pipeline_id: str
+    ) -> tuple[str, ...]:
+        raw_inputs = raw_pipeline.get(cls.KEY_PIPELINE_INPUTS)
+        if raw_inputs is None:
+            return ()
+        if not isinstance(raw_inputs, dict):
+            raise ValueError(f"pipeline '{pipeline_id}' inputs must be a mapping")
+
+        raw_required = raw_inputs.get(cls.KEY_PIPELINE_INPUTS_REQUIRED)
+        if raw_required is None:
+            return ()
+        if not isinstance(raw_required, list) or not all(
+            isinstance(input_id, str) and input_id for input_id in raw_required
+        ):
+            raise ValueError(
+                f"pipeline '{pipeline_id}' inputs.required must be a list of strings"
+            )
+        return tuple(raw_required)
+
+    @classmethod
+    def _parse_stage(
+        cls, raw_stage: Any, index: int, pipeline_id: str
+    ) -> PipelineStageConfig:
+        if not isinstance(raw_stage, dict):
+            raise ValueError(
+                f"stage at index {index} in pipeline '{pipeline_id}' must be a mapping"
+            )
+
+        stage_label = f"stage at index {index} in pipeline '{pipeline_id}'"
+        stage_id = cls._required_non_empty_string(
+            raw_stage, cls.KEY_STAGE_ID, stage_label
+        )
+        enabled = cls._required_bool(raw_stage, cls.KEY_STAGE_ENABLED, stage_label)
+        module = cls._required_non_empty_string(
+            raw_stage, cls.KEY_STAGE_MODULE, f"stage '{stage_id}'"
+        )
+
+        class_name = raw_stage.get(cls.KEY_STAGE_CLASS)
+        if class_name is None:
+            class_name = raw_stage.get(cls.KEY_STAGE_CLASS_NAME)
+        if not isinstance(class_name, str) or not class_name:
+            raise ValueError(f"stage '{stage_id}' must have a non-empty 'class'")
+
+        config = raw_stage.get(cls.KEY_STAGE_CONFIG, {})
+        if not isinstance(config, dict):
+            raise ValueError(f"stage '{stage_id}' config must be a mapping")
+
+        return PipelineStageConfig(
+            id=stage_id,
+            module=module,
+            class_name=class_name,
+            enabled=enabled,
+            config=config,
+        )
+
+    @classmethod
+    def _parse_pipeline_edge(cls, raw_edge: Any, index: int) -> PipelineEdge:
+        if not isinstance(raw_edge, dict):
+            raise ValueError(f"edge at index {index} must be a mapping")
+
+        source = cls._required_non_empty_string(
+            raw_edge, cls.KEY_PIPELINE_EDGE_FROM, f"edge at index {index}"
+        )
+        target = cls._required_non_empty_string(
+            raw_edge, cls.KEY_PIPELINE_EDGE_TO, f"edge at index {index}"
+        )
+        return PipelineEdge(source=source, target=target)
+
+    @classmethod
+    def _required_non_empty_string(
+        cls, raw_value: dict[str, Any], key: str, field_label: str
+    ) -> str:
+        value = raw_value.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{field_label} must have a non-empty '{key}'")
+        return value
+
+    @classmethod
+    def _required_bool(
+        cls, raw_value: dict[str, Any], key: str, field_label: str
+    ) -> bool:
+        value = raw_value.get(key)
+        if not isinstance(value, bool):
+            raise ValueError(f"{field_label} must have '{key}' true/false")
+        return value
+
+    def _validate_fan_in_requirements(
+        self, graph: PipelineGraph, field_label: str, errors: List[str]
+    ) -> None:
+        for pipeline in graph.pipelines:
+            upstream_ids = graph.upstream_ids(pipeline.id)
+            if len(upstream_ids) < 2:
+                continue
+
+            if not pipeline.required_inputs:
+                errors.append(
+                    f"{field_label}->pipeline '{pipeline.id}' must define "
+                    "inputs.required for fan-in"
+                )
+                continue
+
+            if set(pipeline.required_inputs) != set(upstream_ids):
+                errors.append(
+                    f"{field_label}->pipeline '{pipeline.id}' inputs.required "
+                    "must match upstream edges"
+                )

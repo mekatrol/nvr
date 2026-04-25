@@ -12,6 +12,37 @@ stream:
   backup_retention_days: 5
   backup_output_path: ../../nvr/streams/backup
 
+pipeline_graph:
+  enabled: false
+  frame_interval_seconds: 1.0
+  pipelines:
+    - id: preprocessing
+      enabled: true
+      stages:
+        - id: example-disabled-crop
+          enabled: false
+          module: nvr_common.pipeline.sample_stages.crop
+          class: CropStage
+          config:
+            x: 0
+            y: 0
+            width: 640
+            height: 480
+
+    - id: thumbnail
+      enabled: true
+      stages:
+        - id: example-disabled-thumbnail
+          enabled: false
+          module: nvr_common.pipeline.sample_stages.thumbnail
+          class: ThumbnailStage
+          config:
+            width: 320
+
+  edges:
+    - from: preprocessing
+      to: thumbnail
+
 cameras:
   - id: driveway
     name: driveway
