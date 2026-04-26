@@ -7,6 +7,7 @@ from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
 from nvr_common.config import Config
 from nvr_common.logging.rtsp_sanitizing_filter import sanitize_rtsp_url
 from nvr_common.pipeline.debug import PipelineDebugSession
+from nvr_web.pipelines_store import PipelinesStore
 
 
 class DebugApiState:
@@ -16,6 +17,7 @@ class DebugApiState:
         self.config = config or Config()
         self.frame_source_factory = frame_source_factory or OpenCvFrameSource
         self.sessions: dict[str, PipelineDebugSession] = {}
+        self.pipelines_store = PipelinesStore(self.config)
 
     def list_cameras(self) -> list[dict[str, Any]]:
         cameras = []
@@ -26,7 +28,7 @@ class DebugApiState:
                         "id": camera.get(Config.KEY_CAMERA_ID),
                         "name": camera.get(Config.KEY_CAMERA_NAME),
                         "enabled": camera.get(Config.KEY_CAMERA_ENABLED, False),
-                        "pipeline_enabled": self.config.get_pipeline_graph(
+                        "pipeline_enabled": self.config.get_pipelines(
                             camera.get(Config.KEY_CAMERA_ID, "")
                         )
                         is not None,
@@ -34,8 +36,8 @@ class DebugApiState:
                 )
         return cameras
 
-    def graph(self, camera_id: str | None = None) -> dict[str, Any]:
-        graph = self.config.get_pipeline_graph(camera_id)
+    def pipelines(self, camera_id: str | None = None) -> dict[str, Any]:
+        graph = self.config.get_pipelines(camera_id)
         if graph is None:
             return {"enabled": False, "pipelines": [], "edges": []}
         return {
@@ -51,6 +53,7 @@ class DebugApiState:
                             "enabled": stage.enabled,
                             "module": stage.module,
                             "class_name": stage.class_name,
+                            "config": stage.config,
                         }
                         for stage in pipeline.stages
                     ],
@@ -63,12 +66,28 @@ class DebugApiState:
     def session(self, camera_id: str) -> PipelineDebugSession | None:
         if camera_id in self.sessions:
             return self.sessions[camera_id]
-        graph = self.config.get_pipeline_graph(camera_id)
+        graph = self.config.get_pipelines(camera_id)
         if graph is None:
             return None
         session = PipelineDebugSession(graph)
         self.sessions[camera_id] = session
         return session
+
+    def draft_pipelines(self) -> dict[str, Any]:
+        return self.pipelines_store.draft_response()
+
+    def save_draft_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
+        return self.pipelines_store.save_draft_pipelines(raw_pipelines)
+
+    def deploy_draft_pipelines(self) -> dict[str, Any]:
+        response = self.pipelines_store.deploy_draft_pipelines()
+        self.reload_config()
+        return response
+
+    def reload_config(self) -> None:
+        self.config = Config()
+        self.pipelines_store = PipelinesStore(self.config)
+        self.sessions.clear()
 
     def load_camera_frame(self, camera_id: str) -> PipelineDebugSession | None:
         session = self.session(camera_id)

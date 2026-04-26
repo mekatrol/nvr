@@ -20,7 +20,7 @@ class CameraPipelineWorker(threading.Thread):
         self.camera_id = camera_id
         self.config = Config()
         self.camera_config = self.config.get_camera(camera_id)
-        self.graph = self.config.get_pipeline_graph(camera_id)
+        self.graph = self.config.get_pipelines(camera_id)
         self.interval_seconds = (
             self.config.get_pipeline_frame_interval_seconds(camera_id) or 1.0
         )
@@ -29,7 +29,9 @@ class CameraPipelineWorker(threading.Thread):
         )
         self.logger = logger
         self.stop_event = threading.Event()
-        self.runner = PipelineGraphRunner(self.graph, logger=logger) if self.graph else None
+        self.runner = (
+            PipelineGraphRunner(self.graph, logger=logger) if self.graph else None
+        )
         self.last_outputs = None
 
     def stop(self) -> None:
@@ -54,7 +56,7 @@ class CameraPipelineWorker(threading.Thread):
         if self.runner is None:
             if self.logger:
                 self.logger.info(
-                    "[%s] Pipeline graph disabled; skipping pipeline worker",
+                    "[%s] Pipelines disabled; skipping pipeline worker",
                     self.camera_id,
                 )
             return

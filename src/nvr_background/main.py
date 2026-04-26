@@ -50,7 +50,7 @@ def main() -> None:
         # Add to recorders
         recorders.append(rec)
 
-        if camera.get(Config.KEY_CAMERA_ENABLED, False) and conf.get_pipeline_graph(
+        if camera.get(Config.KEY_CAMERA_ENABLED, False) and conf.get_pipelines(
             camera["id"]
         ):
             pipeline_worker = CameraPipelineWorker(camera["id"], logger=logger)

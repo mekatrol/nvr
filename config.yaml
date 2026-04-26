@@ -4,6 +4,9 @@ log_path: ../../nvr/logs
 # Location of ffmpeg binary
 ffmpeg_binary: ffmpeg # or full path: /usr/bin/ffmpeg
 
+# Folder for editable and deployed pipeline YAML files
+pipelines_storage_path: ../../nvr/pipelines
+
 # Stream settings
 stream:
   segment_seconds: 300 # 5 minutes per file
@@ -12,7 +15,7 @@ stream:
   backup_retention_days: 5
   backup_output_path: ../../nvr/streams/backup
 
-pipeline_graph:
+pipelines:
   enabled: true
   frame_interval_seconds: 1.0
   pipelines:

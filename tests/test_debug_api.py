@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from nvr_common.config import Config
 from nvr_web.debug_api_state import DebugApiState
@@ -59,6 +60,99 @@ class DebugApiTest(unittest.TestCase):
             )
             self.assertEqual([8, 10, 3], state["records"][0]["input_shape"])
 
+    def test_config_creates_pipeline_storage_directory_on_load(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            self._config(temp_path)
+
+            self.assertTrue((temp_path / "pipelines").is_dir())
+
+    def test_pipeline_draft_save_does_not_modify_deployed_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            TestableDebugApiHandler.api_state = DebugApiState(config, FakeFrameSource)
+
+            save_handler = TestableDebugApiHandler(
+                "/api/pipelines/draft",
+                method="POST",
+                body=json.dumps(
+                    {
+                        "enabled": True,
+                        "frame_interval_seconds": 2,
+                        "pipelines": [
+                            {"id": "draft-only", "enabled": True, "stages": []}
+                        ],
+                        "edges": [],
+                    }
+                ).encode("utf-8"),
+            )
+            save_handler.do_POST()
+
+            config_data = yaml.safe_load((temp_path / "config.yaml").read_text())
+            draft_data = yaml.safe_load(
+                (temp_path / "pipelines" / "pipelines.draft.yaml").read_text()
+            )
+
+            self.assertEqual(200, save_handler.status)
+            self.assertEqual(
+                "preprocessing", config_data["pipelines"]["pipelines"][0]["id"]
+            )
+            self.assertEqual(
+                "draft-only", draft_data["pipelines"][0]["id"]
+            )
+
+    def test_pipeline_draft_deploy_updates_deployed_file_and_reloads_sessions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            state = DebugApiState(config, FakeFrameSource)
+            TestableDebugApiHandler.api_state = state
+            self.assertIsNotNone(state.session("driveway"))
+
+            save_handler = TestableDebugApiHandler(
+                "/api/pipelines/draft",
+                method="POST",
+                body=json.dumps(
+                    {
+                        "enabled": True,
+                        "frame_interval_seconds": 2,
+                        "pipelines": [
+                            {
+                                "id": "deployed-pipeline",
+                                "enabled": True,
+                                "stages": [],
+                            }
+                        ],
+                        "edges": [],
+                    }
+                ).encode("utf-8"),
+            )
+            save_handler.do_POST()
+            deploy_handler = TestableDebugApiHandler("/api/pipelines/draft/deploy")
+            deploy_handler.do_POST()
+
+            config_data = yaml.safe_load((temp_path / "config.yaml").read_text())
+            pipelines_handler = TestableDebugApiHandler("/api/pipelines")
+            pipelines_handler.do_GET()
+            pipelines = json.loads(pipelines_handler.wfile.getvalue().decode("utf-8"))
+            deployed_data = yaml.safe_load(
+                (
+                    temp_path / "pipelines" / "pipelines.deployed.yaml"
+                ).read_text()
+            )
+
+            self.assertEqual(200, deploy_handler.status)
+            self.assertEqual(
+                "preprocessing", config_data["pipelines"]["pipelines"][0]["id"]
+            )
+            self.assertEqual(
+                "deployed-pipeline",
+                deployed_data["pipelines"][0]["id"],
+            )
+            self.assertEqual("deployed-pipeline", pipelines["pipelines"][0]["id"])
+            self.assertEqual({}, state.sessions)
+
     def _config(self, temp_path):
         config_path = temp_path / "config.yaml"
         write_config(
@@ -86,6 +180,7 @@ class DebugApiTest(unittest.TestCase):
                 ],
                 "edges": [],
             },
+            pipelines_storage_path="pipelines",
         )
         set_config_env(config_path)
         return Config()

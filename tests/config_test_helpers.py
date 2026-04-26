@@ -11,7 +11,12 @@ def reset_config_singleton():
         delattr(Config, "_instance")
 
 
-def write_config(path: Path, pipeline_graph: dict, cameras: list[dict] | None = None):
+def write_config(
+    path: Path,
+    pipelines: dict,
+    cameras: list[dict] | None = None,
+    pipelines_storage_path: str | None = None,
+):
     config = {
         "log_path": "../../nvr/logs",
         "ffmpeg_binary": "ffmpeg",
@@ -22,7 +27,7 @@ def write_config(path: Path, pipeline_graph: dict, cameras: list[dict] | None = 
             "backup_retention_days": 5,
             "backup_output_path": "../../nvr/streams/backup",
         },
-        "pipeline_graph": pipeline_graph,
+        "pipelines": pipelines,
         "cameras": cameras
         or [
             {
@@ -34,6 +39,8 @@ def write_config(path: Path, pipeline_graph: dict, cameras: list[dict] | None = 
             }
         ],
     }
+    if pipelines_storage_path is not None:
+        config["pipelines_storage_path"] = pipelines_storage_path
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
 

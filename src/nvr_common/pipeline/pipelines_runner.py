@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Any
 
 from nvr_common.pipeline.pipeline_context import PipelineContext
-from nvr_common.pipeline.pipeline_graph import PipelineGraph
+from nvr_common.pipeline.pipelines import PipelineGraph
 from nvr_common.pipeline.pipeline_input import PipelineInput
 from nvr_common.pipeline.pipeline_output import PipelineOutput
 from nvr_common.pipeline.pipeline_stage_loader import PipelineStageLoader

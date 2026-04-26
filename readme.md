@@ -1,14 +1,14 @@
 # NVR
 
-Small Python NVR service that records RTSP cameras with `ffmpeg`, manages old recordings, and can run sampled camera frames through a configurable image-processing pipeline graph.
+Small Python NVR service that records RTSP cameras with `ffmpeg`, manages old recordings, and can run sampled camera frames through configurable image-processing pipelines.
 
 ## How It Works
 
 The background service starts one recorder thread per enabled camera. Each recorder launches `ffmpeg`, copies the RTSP stream into segmented MP4 files, and leaves recording independent from image processing.
 
-Pipeline processing runs beside recording through a separate sampled frame acquisition path. A per-camera pipeline worker reads frames with OpenCV at `pipeline_graph.frame_interval_seconds`, runs the configured graph, and logs failures without stopping the recorder.
+Pipeline processing runs beside recording through a separate sampled frame acquisition path. A per-camera pipeline worker reads frames with OpenCV at `pipelines.frame_interval_seconds`, runs the configured pipelines, and logs failures without stopping the recorder.
 
-The pipeline graph is a directed acyclic graph of named pipelines. Each named pipeline contains ordered, pluggable Python stages. Pipeline outputs can fan out to multiple downstream pipelines, and a downstream pipeline can fan in multiple upstream outputs from the same frame.
+Pipelines are configured as named pipelines connected by directed edges. Each named pipeline contains ordered, pluggable Python stages. Pipeline outputs can fan out to multiple downstream pipelines, and a downstream pipeline can fan in multiple upstream outputs from the same frame.
 
 Example flow:
 
@@ -29,7 +29,7 @@ The original frame remains available to every stage. Branch metadata is isolated
 
 - `nvr.py`: thin compatibility launcher for the background service.
 - `src/nvr_background`: service startup, recorder lifecycle, retention management, frame acquisition, and camera pipeline workers.
-- `src/nvr_common`: shared config, logging, RTSP sanitizing, and pipeline graph primitives.
+- `src/nvr_common`: shared config, logging, RTSP sanitizing, and pipeline primitives.
 - `src/nvr_common/pipeline/sample_stages`: OpenCV sample stages, synthetic detection/tracking stages, approach detection, MQTT output, and fan-in metadata merging.
 - `src/nvr_web`: standard-library debug API server.
 - `src/nvr_ui`: Vue 3 TypeScript Vite debugger UI.
@@ -113,10 +113,10 @@ class ExampleStage:
         return result
 ```
 
-The checked-in `config.yaml` includes a runnable sample graph:
+The checked-in `config.yaml` includes runnable sample pipelines:
 
 ```yaml
-pipeline_graph:
+pipelines:
   enabled: true
   frame_interval_seconds: 1.0
   pipelines:
@@ -148,16 +148,19 @@ pipeline_graph:
       to: thumbnail
 ```
 
-Global pipeline config can be overridden per camera with a `pipeline_graph` block under that camera. Pipeline overrides merge by pipeline `id`; stage overrides merge by stage `id`.
+Global pipeline config can be overridden per camera with a `pipelines` block under that camera. Pipeline overrides merge by pipeline `id`; stage overrides merge by stage `id`.
 
-Graph validation rejects duplicate pipeline ids, duplicate stage ids within a pipeline, unknown edge endpoints, self-edges, and cycles. Fan-in pipelines with multiple upstream edges should declare `inputs.required`.
+Pipeline validation rejects duplicate pipeline ids, duplicate stage ids within a pipeline, unknown edge endpoints, self-edges, and cycles. Fan-in pipelines with multiple upstream edges should declare `inputs.required`.
 
 ## Debugger API
 
 The debug backend exposes JSON endpoints for the Vue UI:
 
 - `GET /api/cameras`
-- `GET /api/pipeline-graph?camera_id=...`
+- `GET /api/pipelines?camera_id=...`
+- `GET /api/pipelines/draft`
+- `POST /api/pipelines/draft`
+- `POST /api/pipelines/draft/deploy`
 - `GET /api/debug/state?camera_id=...`
 - `POST /api/debug/breakpoints`
 - `POST /api/debug/command`

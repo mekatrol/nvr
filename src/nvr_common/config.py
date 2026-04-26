@@ -31,8 +31,9 @@ class Config(Singleton, MutableMapping):
     KEY_CAMERA_ENABLED: str = "enabled"
     KEY_CAMERA_RTSP_URL: str = "rtsp_url"
     KEY_CAMERA_LOG_FFMPEG: str = "log_ffmpeg"
-    KEY_PIPELINE_GRAPH: str = "pipeline_graph"
-    KEY_PIPELINE_GRAPH_ENABLED: str = "enabled"
+    KEY_PIPELINES_STORAGE_PATH: str = "pipelines_storage_path"
+    KEY_PIPELINES_CONFIG: str = "pipelines"
+    KEY_PIPELINES_ENABLED: str = "enabled"
     KEY_PIPELINE_FRAME_INTERVAL_SECONDS: str = "frame_interval_seconds"
     KEY_PIPELINES: str = "pipelines"
     KEY_PIPELINE_ID: str = "id"
@@ -94,40 +95,65 @@ class Config(Singleton, MutableMapping):
 
         # Validate the loaded configuration
         self._validate()
+        self.get_pipelines_storage_path().mkdir(parents=True, exist_ok=True)
 
     def get_camera(self, camera_id: str) -> Dict[str, Any]:
         return self.cameras_by_id[camera_id]
 
-    def get_pipeline_graph_config(
+    def get_pipelines_storage_path(self) -> Path:
+        raw_path = self._conf.get(self.KEY_PIPELINES_STORAGE_PATH)
+        if isinstance(raw_path, str) and raw_path:
+            path = Path(raw_path)
+        else:
+            path = Path(self.config_path).parent
+
+        if not path.is_absolute():
+            path = (Path(self.config_path).parent / path).resolve()
+        return path
+
+    def get_deployed_pipelines_path(self) -> Path:
+        return self.get_pipelines_storage_path() / "pipelines.deployed.yaml"
+
+    def get_pipelines_config(
         self, camera_id: str | None = None
     ) -> Dict[str, Any] | None:
-        pipeline_graph = self._conf.get(self.KEY_PIPELINE_GRAPH)
+        pipelines = self._load_deployed_pipelines_config() or self._conf.get(
+            self.KEY_PIPELINES_CONFIG
+        )
 
         if camera_id is not None:
             camera = self.get_camera(camera_id)
-            camera_pipeline_graph = camera.get(self.KEY_PIPELINE_GRAPH)
-            if camera_pipeline_graph is not None:
-                pipeline_graph = self._merge_pipeline_graph_dict(
-                    pipeline_graph, camera_pipeline_graph
+            camera_pipelines = camera.get(self.KEY_PIPELINES_CONFIG)
+            if camera_pipelines is not None:
+                pipelines = self._merge_pipelines_dict(
+                    pipelines, camera_pipelines
                 )
 
-        return pipeline_graph if isinstance(pipeline_graph, dict) else None
+        return pipelines if isinstance(pipelines, dict) else None
 
-    def get_pipeline_graph(self, camera_id: str | None = None) -> PipelineGraph | None:
-        pipeline_graph = self.get_pipeline_graph_config(camera_id)
-        if not pipeline_graph:
+    def _load_deployed_pipelines_config(self) -> Dict[str, Any] | None:
+        deployed_path = self.get_deployed_pipelines_path()
+        if not deployed_path.exists():
             return None
-        if pipeline_graph.get(self.KEY_PIPELINE_GRAPH_ENABLED) is False:
+        deployed_config = self._load_config(str(deployed_path))
+        pipelines = self._unwrap_pipelines_config(deployed_config)
+        return pipelines if isinstance(pipelines, dict) else None
+
+    def get_pipelines(self, camera_id: str | None = None) -> PipelineGraph | None:
+        pipelines = self.get_pipelines_config(camera_id)
+        if not pipelines:
             return None
-        return self._parse_pipeline_graph(pipeline_graph)
+        if pipelines.get(self.KEY_PIPELINES_ENABLED) is False:
+            return None
+        return self._parse_pipelines(pipelines)
 
     def get_pipeline_frame_interval_seconds(
         self, camera_id: str | None = None
     ) -> float | None:
-        pipeline_graph = self.get_pipeline_graph_config(camera_id)
-        if not pipeline_graph:
+        pipelines = self.get_pipelines_config(camera_id)
+        if not pipelines:
             return None
-        value = pipeline_graph.get(self.KEY_PIPELINE_FRAME_INTERVAL_SECONDS)
+        value = pipelines.get(self.KEY_PIPELINE_FRAME_INTERVAL_SECONDS)
         return float(value) if isinstance(value, (int, float)) else None
 
     def log_config(self, logger: logging.Logger | None = None) -> None:
@@ -231,8 +257,7 @@ class Config(Singleton, MutableMapping):
             if cam_id in merged_by_id:
                 # Deep merge the individual camera dict
                 merged_by_id[cam_id] = Config._merge_dicts(
-                    merged_by_id[cam_id],
-                    override_cam,
+                    merged_by_id[cam_id], override_cam
                 )
             else:
                 merged_by_id[cam_id] = dict(override_cam)
@@ -242,8 +267,7 @@ class Config(Singleton, MutableMapping):
 
     @staticmethod
     def _merge_stream_dict(
-        base_stream: dict[str, Any] | None,
-        override_stream: dict[str, Any] | None,
+        base_stream: dict[str, Any] | None, override_stream: dict[str, Any] | None
     ) -> dict[str, Any]:
         """
         Merge two 'stream' dicts.
@@ -296,11 +320,11 @@ class Config(Singleton, MutableMapping):
                     result[key] = Config._merge_stream_dict(base_value, override_value)
 
                 elif (
-                    key == Config.KEY_PIPELINE_GRAPH
+                    key == Config.KEY_PIPELINES_CONFIG
                     and isinstance(base_value, dict)
                     and isinstance(override_value, dict)
                 ):
-                    result[key] = Config._merge_pipeline_graph_dict(
+                    result[key] = Config._merge_pipelines_dict(
                         base_value, override_value
                     )
 
@@ -314,7 +338,7 @@ class Config(Singleton, MutableMapping):
         return overrides
 
     @staticmethod
-    def _merge_pipeline_graph_dict(
+    def _merge_pipelines_dict(
         base_graph: Any, override_graph: Any
     ) -> dict[str, Any]:
         if not isinstance(base_graph, dict):
@@ -388,9 +412,7 @@ class Config(Singleton, MutableMapping):
         return result
 
     @staticmethod
-    def _merge_stage_list(
-        base_list: list[Any], override_list: list[Any]
-    ) -> list[Any]:
+    def _merge_stage_list(base_list: list[Any], override_list: list[Any]) -> list[Any]:
         merged_by_id: dict[str, dict[str, Any]] = {}
         invalid_entries: list[Any] = []
 
@@ -429,6 +451,11 @@ class Config(Singleton, MutableMapping):
         with open(path, "r", encoding="utf-8") as f:
             data: Any = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
+
+    @classmethod
+    def _unwrap_pipelines_config(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        wrapper = data.get(cls.KEY_PIPELINES_CONFIG)
+        return wrapper if isinstance(wrapper, dict) else data
 
     def _validate_dir_path(
         self, raw_value: Any, field_label: str, errors: List[str], validate_exists: True
@@ -583,6 +610,15 @@ class Config(Singleton, MutableMapping):
         if not isinstance(ffmpeg_binary, str) or not ffmpeg_binary.strip():
             errors.append("ffmpeg_binary must be a non-empty string")
 
+        pipelines_storage_path: Any = self._conf.get(
+            self.KEY_PIPELINES_STORAGE_PATH
+        )
+        if pipelines_storage_path is not None and (
+            not isinstance(pipelines_storage_path, str)
+            or not pipelines_storage_path
+        ):
+            errors.append("pipelines_storage_path must be a non-empty string")
+
         # cameras validation
         cameras: Any = self._conf.get(self.KEY_CAMERAS, [])
         if not isinstance(cameras, list):
@@ -651,55 +687,60 @@ class Config(Singleton, MutableMapping):
                             f"'log_ffmpeg' (must be true/false if present)"
                         )
 
-                if self.KEY_PIPELINE_GRAPH in camera:
-                    effective_pipeline_graph = self._merge_pipeline_graph_dict(
-                        self._conf.get(self.KEY_PIPELINE_GRAPH),
-                        camera.get(self.KEY_PIPELINE_GRAPH),
+                if self.KEY_PIPELINES_CONFIG in camera:
+                    effective_pipelines = self._merge_pipelines_dict(
+                        self._conf.get(self.KEY_PIPELINES_CONFIG),
+                        camera.get(self.KEY_PIPELINES_CONFIG),
                     )
-                    self._validate_pipeline_graph(
-                        effective_pipeline_graph,
-                        f"camera '{camera_id or index}' pipeline_graph",
+                    self._validate_pipelines(
+                        effective_pipelines,
+                        f"camera '{camera_id or index}' pipelines",
                         errors,
                     )
 
-        if self.KEY_PIPELINE_GRAPH in self._conf:
-            self._validate_pipeline_graph(
-                self._conf.get(self.KEY_PIPELINE_GRAPH), "pipeline_graph", errors
+        if self.KEY_PIPELINES_CONFIG in self._conf:
+            self._validate_pipelines(
+                self._conf.get(self.KEY_PIPELINES_CONFIG), "pipelines", errors
+            )
+
+        deployed_pipelines = self._load_deployed_pipelines_config()
+        if deployed_pipelines is not None:
+            self._validate_pipelines(
+                deployed_pipelines,
+                f"{self.get_deployed_pipelines_path()} pipelines",
+                errors,
             )
 
         if errors:
             message = "Invalid configuration:\n- " + "\n- ".join(errors)
             raise ValueError(message)
 
-    def _validate_pipeline_graph(
-        self, raw_graph: Any, field_label: str, errors: List[str]
+    def _validate_pipelines(
+        self, raw_pipelines_config: Any, field_label: str, errors: List[str]
     ) -> None:
-        if not isinstance(raw_graph, dict):
+        if not isinstance(raw_pipelines_config, dict):
             errors.append(f"{field_label} must be a dictionary value")
             return
 
-        enabled = raw_graph.get(self.KEY_PIPELINE_GRAPH_ENABLED)
+        enabled = raw_pipelines_config.get(self.KEY_PIPELINES_ENABLED)
         if not isinstance(enabled, bool):
             errors.append(f"{field_label}->enabled must be true/false")
 
-        interval = raw_graph.get(self.KEY_PIPELINE_FRAME_INTERVAL_SECONDS)
+        interval = raw_pipelines_config.get(self.KEY_PIPELINE_FRAME_INTERVAL_SECONDS)
         if interval is not None:
             self._validate_float(
-                interval,
-                f"{field_label}->frame_interval_seconds",
-                errors,
-                0,
+                interval, f"{field_label}->frame_interval_seconds", errors, 0
             )
 
-        if self.KEY_PIPELINES not in raw_graph:
+        if self.KEY_PIPELINES not in raw_pipelines_config:
             errors.append(f"{field_label}->pipelines is required")
             return
-        if self.KEY_PIPELINE_EDGES not in raw_graph:
+        if self.KEY_PIPELINE_EDGES not in raw_pipelines_config:
             errors.append(f"{field_label}->edges is required")
             return
 
         try:
-            graph = self._parse_pipeline_graph(raw_graph)
+            graph = self._parse_pipelines(raw_pipelines_config)
         except ValueError as ex:
             errors.append(f"{field_label}: {ex}")
             return
@@ -713,9 +754,9 @@ class Config(Singleton, MutableMapping):
         self._validate_fan_in_requirements(graph, field_label, errors)
 
     @classmethod
-    def _parse_pipeline_graph(cls, raw_graph: dict[str, Any]) -> PipelineGraph:
-        raw_pipelines = raw_graph.get(cls.KEY_PIPELINES)
-        raw_edges = raw_graph.get(cls.KEY_PIPELINE_EDGES)
+    def _parse_pipelines(cls, raw_pipelines_config: dict[str, Any]) -> PipelineGraph:
+        raw_pipelines = raw_pipelines_config.get(cls.KEY_PIPELINES)
+        raw_edges = raw_pipelines_config.get(cls.KEY_PIPELINE_EDGES)
         if not isinstance(raw_pipelines, list):
             raise ValueError("pipelines must be a list")
         if not isinstance(raw_edges, list):

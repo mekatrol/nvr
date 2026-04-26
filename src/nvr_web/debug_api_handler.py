@@ -10,7 +10,7 @@ from nvr_web.debug_api_state import DebugApiState
 
 
 class DebugApiHandler(SimpleHTTPRequestHandler):
-    api_state = DebugApiState()
+    api_state: DebugApiState | None = None
 
     def __init__(self, *args: Any, directory: str | None = None, **kwargs: Any) -> None:
         static_dir = directory or str(Path(__file__).with_name("web"))
@@ -19,13 +19,17 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+        api_state = self._api_state()
 
         if parsed.path == "/api/cameras":
-            self._json({"cameras": self.api_state.list_cameras()})
+            self._json({"cameras": api_state.list_cameras()})
             return
-        if parsed.path == "/api/pipeline-graph":
+        if parsed.path == "/api/pipelines":
             camera_id = self._query_value(query, "camera_id")
-            self._json(self.api_state.graph(camera_id))
+            self._json(api_state.pipelines(camera_id))
+            return
+        if parsed.path == "/api/pipelines/draft":
+            self._json(api_state.draft_pipelines())
             return
         if parsed.path == "/api/debug/state":
             camera_id = self._query_value(query, "camera_id")
@@ -45,11 +49,31 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        api_state = self._api_state()
+        if parsed.path == "/api/pipelines/draft":
+            body = self._read_json()
+            raw_pipelines = body.get("pipelines_config", body)
+            if not isinstance(raw_pipelines, dict):
+                self._json({"error": "pipelines config is required"}, status=400)
+                return
+            try:
+                self._json(api_state.save_draft_pipelines(raw_pipelines))
+            except ValueError as ex:
+                self._json({"error": str(ex)}, status=400)
+            return
+
+        if parsed.path == "/api/pipelines/draft/deploy":
+            try:
+                self._json(api_state.deploy_draft_pipelines())
+            except ValueError as ex:
+                self._json({"error": str(ex)}, status=400)
+            return
+
         if parsed.path == "/api/debug/breakpoints":
             body = self._read_json()
-            session = self.api_state.session(body.get("camera_id", ""))
+            session = api_state.session(body.get("camera_id", ""))
             if session is None:
-                self._json({"error": "pipeline graph disabled"}, status=404)
+                self._json({"error": "pipelines disabled"}, status=404)
                 return
             pipeline_id = body.get("pipeline_id")
             stage_id = body.get("stage_id")
@@ -65,21 +89,19 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/debug/command":
             body = self._read_json()
-            session = self.api_state.session(body.get("camera_id", ""))
+            session = api_state.session(body.get("camera_id", ""))
             if session is None:
-                self._json({"error": "pipeline graph disabled"}, status=404)
+                self._json({"error": "pipelines disabled"}, status=404)
                 return
             command = body.get("command")
             if command == "run":
                 try:
-                    session = self.api_state.load_camera_frame(
-                        body.get("camera_id", "")
-                    )
+                    session = api_state.load_camera_frame(body.get("camera_id", ""))
                 except RuntimeError as ex:
                     self._json({"error": str(ex)}, status=502)
                     return
                 if session is None:
-                    self._json({"error": "pipeline graph disabled"}, status=404)
+                    self._json({"error": "pipelines disabled"}, status=404)
                     return
                 session.run()
             elif command == "pause":
@@ -108,10 +130,16 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
     def _session_snapshot(self, camera_id: str | None) -> dict[str, Any]:
         if not camera_id:
             return {"status": "disabled", "records": []}
-        session = self.api_state.session(camera_id)
+        session = self._api_state().session(camera_id)
         if session is None:
             return {"status": "disabled", "records": []}
         return session.snapshot()
+
+    @classmethod
+    def _api_state(cls) -> DebugApiState:
+        if cls.api_state is None:
+            cls.api_state = DebugApiState()
+        return cls.api_state
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))

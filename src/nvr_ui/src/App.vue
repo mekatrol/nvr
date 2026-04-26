@@ -13,6 +13,7 @@ type Stage = {
   enabled: boolean
   module: string
   class_name: string
+  config: Record<string, unknown>
 }
 
 type Pipeline = {
@@ -46,6 +47,13 @@ type DebugState = {
   records?: DebugRecord[]
 }
 
+type PipelinesResponse = {
+  enabled: boolean
+  frame_interval_seconds: number | string | null
+  pipelines: Pipeline[]
+  edges: Edge[]
+}
+
 const cameras = ref<Camera[]>([])
 const selectedCameraId = ref('')
 const pipelines = ref<Pipeline[]>([])
@@ -55,12 +63,33 @@ const metadata = ref<Record<string, unknown>>({})
 const selectedBreakpoint = ref('')
 const apiError = ref('')
 const isLoadingCameras = ref(false)
+const draftEnabled = ref(true)
+const draftFrameIntervalSeconds = ref('1.0')
+const draftPipelines = ref<Pipeline[]>([])
+const draftEdges = ref<Edge[]>([])
+const selectedPipelineId = ref('')
+const selectedStageId = ref('')
+const selectedPipelineIdEdit = ref('')
+const selectedStageIdEdit = ref('')
+const selectedStageModule = ref('')
+const selectedStageClassName = ref('')
+const selectedStageConfigJson = ref('{}')
+const selectedPipelineRequiredInputs = ref('')
+const deployStatus = ref('')
 
 const selectedCamera = computed(() =>
   cameras.value.find((camera) => camera.id === selectedCameraId.value),
 )
 
 const latestRecord = computed(() => debugState.value.records?.at(-1))
+
+const selectedDraftPipeline = computed(() =>
+  draftPipelines.value.find((pipeline) => pipeline.id === selectedPipelineId.value),
+)
+
+const selectedDraftStage = computed(() =>
+  selectedDraftPipeline.value?.stages.find((stage) => stage.id === selectedStageId.value),
+)
 
 async function loadCameras() {
   isLoadingCameras.value = true
@@ -76,13 +105,26 @@ async function loadCameras() {
   }
 }
 
-async function loadGraph() {
+async function loadPipelines() {
   if (!selectedCameraId.value) return
   const graph = await getJson<{ pipelines: Pipeline[]; edges: Edge[] }>(
-    `/api/pipeline-graph?camera_id=${encodeURIComponent(selectedCameraId.value)}`,
+    `/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}`,
   )
   pipelines.value = graph.pipelines
   edges.value = graph.edges
+}
+
+async function loadDraftPipelines() {
+  const graph = await getJson<PipelinesResponse>('/api/pipelines/draft')
+  draftEnabled.value = graph.enabled
+  draftFrameIntervalSeconds.value = String(graph.frame_interval_seconds ?? '1.0')
+  draftPipelines.value = graph.pipelines
+  draftEdges.value = graph.edges
+  if (!selectedPipelineId.value && draftPipelines.value[0]) {
+    selectPipeline(draftPipelines.value[0].id)
+  } else {
+    refreshSelectedEditors()
+  }
 }
 
 async function loadDebugState() {
@@ -118,11 +160,30 @@ async function toggleBreakpoint(enabled: boolean) {
 
 async function refreshCamera() {
   try {
-    await loadGraph()
+    await loadPipelines()
     await loadDebugState()
+    await loadDraftPipelines()
   } catch {
     return
   }
+}
+
+async function saveDraftPipelines() {
+  deployStatus.value = ''
+  const saved = await postJson<PipelinesResponse>('/api/pipelines/draft', toPipelinesPayload())
+  draftPipelines.value = saved.pipelines
+  draftEdges.value = saved.edges
+  refreshSelectedEditors()
+  deployStatus.value = 'Draft saved'
+}
+
+async function deployDraftPipelines() {
+  await saveDraftPipelines()
+  const deployed = await postJson<PipelinesResponse>('/api/pipelines/draft/deploy', {})
+  pipelines.value = deployed.pipelines
+  edges.value = deployed.edges
+  await loadDebugState()
+  deployStatus.value = 'Draft deployed and server config reloaded'
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -163,6 +224,154 @@ async function postJson<T>(path: string, body: Record<string, unknown>): Promise
 
 function formatJson(value: unknown) {
   return JSON.stringify(value ?? {}, null, 2)
+}
+
+function addPipeline() {
+  const baseId = uniqueId('pipeline', draftPipelines.value.map((pipeline) => pipeline.id))
+  draftPipelines.value.push({ id: baseId, enabled: true, required_inputs: [], stages: [] })
+  selectPipeline(baseId)
+}
+
+function deleteSelectedPipeline() {
+  if (!selectedDraftPipeline.value) return
+  draftPipelines.value = draftPipelines.value.filter(
+    (pipeline) => pipeline.id !== selectedPipelineId.value,
+  )
+  draftEdges.value = draftEdges.value.filter(
+    (edge) => edge.from !== selectedPipelineId.value && edge.to !== selectedPipelineId.value,
+  )
+  selectedPipelineId.value = draftPipelines.value[0]?.id ?? ''
+  selectedStageId.value = ''
+  refreshSelectedEditors()
+}
+
+function addStage() {
+  if (!selectedDraftPipeline.value) return
+  const baseId = uniqueId(
+    'stage',
+    selectedDraftPipeline.value.stages.map((stage) => stage.id),
+  )
+  selectedDraftPipeline.value.stages.push({
+    id: baseId,
+    enabled: true,
+    module: 'nvr_common.pipeline.sample_stages.metadata_annotation_stage',
+    class_name: 'MetadataAnnotationStage',
+    config: { metadata: {} },
+  })
+  selectStage(baseId)
+}
+
+function deleteSelectedStage() {
+  if (!selectedDraftPipeline.value || !selectedStageId.value) return
+  selectedDraftPipeline.value.stages = selectedDraftPipeline.value.stages.filter(
+    (stage) => stage.id !== selectedStageId.value,
+  )
+  selectedStageId.value = selectedDraftPipeline.value.stages[0]?.id ?? ''
+  refreshSelectedEditors()
+}
+
+function selectPipeline(pipelineId: string) {
+  selectedPipelineId.value = pipelineId
+  selectedStageId.value = selectedDraftPipeline.value?.stages[0]?.id ?? ''
+  refreshSelectedEditors()
+}
+
+function selectStage(stageId: string) {
+  selectedStageId.value = stageId
+  refreshSelectedEditors()
+}
+
+function applyPipelineEdits() {
+  const pipeline = selectedDraftPipeline.value
+  if (!pipeline) return
+  const nextId = selectedPipelineIdEdit.value.trim()
+  if (!nextId) return
+  const oldId = pipeline.id
+  pipeline.id = nextId
+  pipeline.required_inputs = selectedPipelineRequiredInputs.value
+    .split(',')
+    .map((input) => input.trim())
+    .filter((input) => input.length > 0)
+  for (const edge of draftEdges.value) {
+    if (edge.from === oldId) edge.from = nextId
+    if (edge.to === oldId) edge.to = nextId
+  }
+  selectedPipelineId.value = nextId
+}
+
+function applyStageEdits() {
+  const stage = selectedDraftStage.value
+  if (!stage) return
+  const nextId = selectedStageIdEdit.value.trim()
+  if (!nextId) return
+  try {
+    stage.config = JSON.parse(selectedStageConfigJson.value) as Record<string, unknown>
+  } catch {
+    apiError.value = 'Stage config must be valid JSON'
+    return
+  }
+  apiError.value = ''
+  stage.id = nextId
+  stage.module = selectedStageModule.value.trim()
+  stage.class_name = selectedStageClassName.value.trim()
+  selectedStageId.value = nextId
+}
+
+function addEdge() {
+  if (draftPipelines.value.length < 2) return
+  const sourcePipeline = draftPipelines.value[0]
+  const targetPipeline = draftPipelines.value[1]
+  if (!sourcePipeline || !targetPipeline) return
+  const from = sourcePipeline.id
+  const to = targetPipeline.id
+  draftEdges.value.push({ from, to })
+}
+
+function deleteEdge(index: number) {
+  draftEdges.value.splice(index, 1)
+}
+
+function refreshSelectedEditors() {
+  const pipeline = selectedDraftPipeline.value
+  selectedPipelineIdEdit.value = pipeline?.id ?? ''
+  selectedPipelineRequiredInputs.value = pipeline?.required_inputs.join(', ') ?? ''
+  const stage = selectedDraftStage.value
+  selectedStageIdEdit.value = stage?.id ?? ''
+  selectedStageModule.value = stage?.module ?? ''
+  selectedStageClassName.value = stage?.class_name ?? ''
+  selectedStageConfigJson.value = formatJson(stage?.config ?? {})
+}
+
+function toPipelinesPayload() {
+  const interval = Number(draftFrameIntervalSeconds.value)
+  return {
+    enabled: draftEnabled.value,
+    frame_interval_seconds: Number.isFinite(interval) ? interval : draftFrameIntervalSeconds.value,
+    pipelines: draftPipelines.value.map((pipeline) => ({
+      id: pipeline.id,
+      enabled: pipeline.enabled,
+      inputs:
+        pipeline.required_inputs.length > 0 ? { required: pipeline.required_inputs } : undefined,
+      stages: pipeline.stages.map((stage) => ({
+        id: stage.id,
+        enabled: stage.enabled,
+        module: stage.module,
+        class: stage.class_name,
+        config: stage.config,
+      })),
+    })),
+    edges: draftEdges.value,
+  }
+}
+
+function uniqueId(prefix: string, existingIds: string[]) {
+  let index = existingIds.length + 1
+  let id = `${prefix}-${index}`
+  while (existingIds.includes(id)) {
+    index += 1
+    id = `${prefix}-${index}`
+  }
+  return id
 }
 
 onMounted(() => {
@@ -219,6 +428,7 @@ onMounted(() => {
         <button @click="toggleBreakpoint(false)">Clear</button>
       </div>
       <p v-if="apiError" class="error">{{ apiError }}</p>
+      <p v-if="deployStatus" class="status">{{ deployStatus }}</p>
     </aside>
 
     <section class="workspace">
@@ -237,6 +447,127 @@ onMounted(() => {
             <span>{{ stage.id }}</span>
             <small>{{ stage.class_name }}</small>
           </button>
+        </div>
+      </section>
+
+      <section class="editor">
+        <header class="editor-header">
+          <strong>Pipeline Draft</strong>
+          <div class="editor-actions">
+            <button @click="loadDraftPipelines">Reload Draft</button>
+            <button @click="saveDraftPipelines">Save Draft</button>
+            <button @click="deployDraftPipelines">Deploy</button>
+          </div>
+        </header>
+
+        <div class="editor-grid">
+          <section class="editor-panel">
+            <header>
+              <strong>Pipelines</strong>
+              <button @click="addPipeline">Add</button>
+            </header>
+            <label class="inline-field">
+              <span>Enabled</span>
+              <input v-model="draftEnabled" type="checkbox" />
+            </label>
+            <label class="field light">
+              <span>Frame interval seconds</span>
+              <input v-model="draftFrameIntervalSeconds" type="text" inputmode="decimal" />
+            </label>
+            <button
+              v-for="pipeline in draftPipelines"
+              :key="pipeline.id"
+              class="stage-row"
+              :class="{ selected: pipeline.id === selectedPipelineId }"
+              @click="selectPipeline(pipeline.id)"
+            >
+              <span>{{ pipeline.id }}</span>
+              <small>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</small>
+            </button>
+          </section>
+
+          <section class="editor-panel">
+            <header>
+              <strong>Pipeline</strong>
+              <button @click="deleteSelectedPipeline">Delete</button>
+            </header>
+            <label class="field light">
+              <span>ID</span>
+              <input v-model="selectedPipelineIdEdit" type="text" />
+            </label>
+            <label class="inline-field">
+              <span>Enabled</span>
+              <input v-if="selectedDraftPipeline" v-model="selectedDraftPipeline.enabled" type="checkbox" />
+            </label>
+            <label class="field light">
+              <span>Required inputs</span>
+              <input v-model="selectedPipelineRequiredInputs" type="text" />
+            </label>
+            <button @click="applyPipelineEdits">Apply Pipeline</button>
+
+            <header>
+              <strong>Stages</strong>
+              <button @click="addStage">Add</button>
+            </header>
+            <button
+              v-for="stage in selectedDraftPipeline?.stages ?? []"
+              :key="stage.id"
+              class="stage-row"
+              :class="{ selected: stage.id === selectedStageId }"
+              @click="selectStage(stage.id)"
+            >
+              <span>{{ stage.id }}</span>
+              <small>{{ stage.class_name }}</small>
+            </button>
+          </section>
+
+          <section class="editor-panel">
+            <header>
+              <strong>Stage</strong>
+              <button @click="deleteSelectedStage">Delete</button>
+            </header>
+            <label class="field light">
+              <span>ID</span>
+              <input v-model="selectedStageIdEdit" type="text" />
+            </label>
+            <label class="inline-field">
+              <span>Enabled</span>
+              <input v-if="selectedDraftStage" v-model="selectedDraftStage.enabled" type="checkbox" />
+            </label>
+            <label class="field light">
+              <span>Module</span>
+              <input v-model="selectedStageModule" type="text" />
+            </label>
+            <label class="field light">
+              <span>Class</span>
+              <input v-model="selectedStageClassName" type="text" />
+            </label>
+            <label class="field light">
+              <span>Config JSON</span>
+              <textarea v-model="selectedStageConfigJson" rows="8"></textarea>
+            </label>
+            <button @click="applyStageEdits">Apply Stage</button>
+          </section>
+
+          <section class="editor-panel">
+            <header>
+              <strong>Edges</strong>
+              <button @click="addEdge">Add</button>
+            </header>
+            <div v-for="(edge, index) in draftEdges" :key="index" class="edge-row">
+              <select v-model="edge.from">
+                <option v-for="pipeline in draftPipelines" :key="pipeline.id" :value="pipeline.id">
+                  {{ pipeline.id }}
+                </option>
+              </select>
+              <select v-model="edge.to">
+                <option v-for="pipeline in draftPipelines" :key="pipeline.id" :value="pipeline.id">
+                  {{ pipeline.id }}
+                </option>
+              </select>
+              <button @click="deleteEdge(index)">Delete</button>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -287,7 +618,9 @@ onMounted(() => {
 }
 
 button,
-select {
+select,
+input,
+textarea {
   font: inherit;
 }
 
@@ -326,6 +659,32 @@ select {
   color: #1f2933;
 }
 
+.field.light input,
+.field.light textarea,
+.edge-row select {
+  width: 100%;
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  padding: 8px;
+  background: #ffffff;
+  color: #1f2933;
+}
+
+.field textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 12px;
+}
+
+.inline-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
 .camera-state {
   display: grid;
   gap: 6px;
@@ -354,7 +713,7 @@ select {
 
 .workspace {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   gap: 16px;
   padding: 18px;
 }
@@ -399,6 +758,70 @@ select {
 
 .stage-row small {
   color: #627386;
+}
+
+.stage-row.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.editor {
+  display: grid;
+  gap: 12px;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.editor-actions button,
+.editor-panel button,
+.edge-row button {
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #1f2933;
+  cursor: pointer;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.editor-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.editor-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.edge-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .details {
@@ -462,9 +885,14 @@ select {
   color: #fecaca;
 }
 
+.status {
+  color: #bbf7d0;
+}
+
 @media (max-width: 820px) {
   .shell,
-  .details {
+  .details,
+  .editor-grid {
     grid-template-columns: 1fr;
   }
 }

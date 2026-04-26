@@ -35,14 +35,14 @@ class ConfigPipelineGraphTest(unittest.TestCase):
 
         self._reset_config_singleton()
 
-    def test_parses_pipeline_graph(self):
+    def test_parses_pipelines(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
             self._write_config(config_path, self._base_config())
             os.environ["NVR_CONFIG"] = str(config_path)
 
             config = Config()
-            graph = config.get_pipeline_graph()
+            graph = config.get_pipelines()
 
             self.assertIsNotNone(graph)
             self.assertEqual(("preprocessing", "thumbnail"), graph.topological_pipeline_ids())
@@ -55,10 +55,10 @@ class ConfigPipelineGraphTest(unittest.TestCase):
             self.assertEqual("AppendStage", stage.class_name)
             self.assertEqual({"suffix": "-base"}, stage.config)
 
-    def test_camera_pipeline_graph_overrides_global_stages_by_id(self):
+    def test_camera_pipelines_overrides_global_stages_by_id(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_data = self._base_config()
-            config_data["cameras"][0]["pipeline_graph"] = {
+            config_data["cameras"][0]["pipelines"] = {
                 "frame_interval_seconds": 3,
                 "pipelines": [
                     {
@@ -81,14 +81,14 @@ class ConfigPipelineGraphTest(unittest.TestCase):
             os.environ["NVR_CONFIG"] = str(config_path)
 
             config = Config()
-            graph = config.get_pipeline_graph("driveway")
+            graph = config.get_pipelines("driveway")
 
             self.assertEqual(3.0, config.get_pipeline_frame_interval_seconds("driveway"))
             stage = graph.pipeline_by_id()["preprocessing"].stages[0]
             self.assertFalse(stage.enabled)
             self.assertEqual({"suffix": "-camera"}, stage.config)
 
-    def test_debug_config_overlays_pipeline_graph(self):
+    def test_debug_config_overlays_pipelines(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
             debug_path = Path(temp_dir) / "config.debug.yaml"
@@ -96,7 +96,7 @@ class ConfigPipelineGraphTest(unittest.TestCase):
             self._write_config(
                 debug_path,
                 {
-                    "pipeline_graph": {
+                    "pipelines": {
                         "pipelines": [
                             {
                                 "id": "preprocessing",
@@ -118,14 +118,14 @@ class ConfigPipelineGraphTest(unittest.TestCase):
             os.environ["NVR_CONFIG"] = str(config_path)
 
             config = Config()
-            stage = config.get_pipeline_graph().pipeline_by_id()["preprocessing"].stages[0]
+            stage = config.get_pipelines().pipeline_by_id()["preprocessing"].stages[0]
 
             self.assertEqual({"suffix": "-debug"}, stage.config)
 
-    def test_rejects_invalid_pipeline_config(self):
+    def test_rejects_invalid_pipelines_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_data = self._base_config()
-            config_data["pipeline_graph"]["pipelines"][0]["stages"][0][
+            config_data["pipelines"]["pipelines"][0]["stages"][0][
                 "config"
             ] = "invalid"
             config_path = Path(temp_dir) / "config.yaml"
@@ -138,21 +138,21 @@ class ConfigPipelineGraphTest(unittest.TestCase):
     def test_rejects_fan_in_without_required_inputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_data = self._base_config()
-            config_data["pipeline_graph"]["pipelines"].append(
+            config_data["pipelines"]["pipelines"].append(
                 {
                     "id": "detection",
                     "enabled": True,
                     "stages": [],
                 }
             )
-            config_data["pipeline_graph"]["pipelines"].append(
+            config_data["pipelines"]["pipelines"].append(
                 {
                     "id": "post_processing",
                     "enabled": True,
                     "stages": [],
                 }
             )
-            config_data["pipeline_graph"]["edges"] = [
+            config_data["pipelines"]["edges"] = [
                 {"from": "preprocessing", "to": "thumbnail"},
                 {"from": "preprocessing", "to": "detection"},
                 {"from": "thumbnail", "to": "post_processing"},
@@ -186,7 +186,7 @@ class ConfigPipelineGraphTest(unittest.TestCase):
                 "backup_retention_days": 5,
                 "backup_output_path": "../../nvr/streams/backup",
             },
-            "pipeline_graph": {
+            "pipelines": {
                 "enabled": True,
                 "frame_interval_seconds": 1.5,
                 "pipelines": [
