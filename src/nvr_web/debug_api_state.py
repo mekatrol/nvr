@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
-
+from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
 from nvr_common.config import Config
+from nvr_common.logging.rtsp_sanitizing_filter import sanitize_rtsp_url
 from nvr_common.pipeline.debug import PipelineDebugSession
 
 
 class DebugApiState:
-    def __init__(self, config: Config | None = None) -> None:
+    def __init__(
+        self, config: Config | None = None, frame_source_factory: Any = None
+    ) -> None:
         self.config = config or Config()
+        self.frame_source_factory = frame_source_factory or OpenCvFrameSource
         self.sessions: dict[str, PipelineDebugSession] = {}
 
     def list_cameras(self) -> list[dict[str, Any]]:
@@ -53,9 +57,7 @@ class DebugApiState:
                 }
                 for pipeline in graph.pipelines
             ],
-            "edges": [
-                {"from": edge.source, "to": edge.target} for edge in graph.edges
-            ],
+            "edges": [{"from": edge.source, "to": edge.target} for edge in graph.edges],
         }
 
     def session(self, camera_id: str) -> PipelineDebugSession | None:
@@ -65,7 +67,37 @@ class DebugApiState:
         if graph is None:
             return None
         session = PipelineDebugSession(graph)
-        image = np.zeros((120, 160, 3), dtype=np.uint8)
-        session.load_frame(camera_id=camera_id, frame_id="debug-frame", image=image)
         self.sessions[camera_id] = session
         return session
+
+    def load_camera_frame(self, camera_id: str) -> PipelineDebugSession | None:
+        session = self.session(camera_id)
+        if session is None:
+            return None
+
+        camera_config = self.config.get_camera(camera_id)
+        frame_source = self.frame_source_factory(
+            camera_config[Config.KEY_CAMERA_RTSP_URL]
+        )
+        try:
+            frame = frame_source.read()
+        except Exception as ex:
+            message = sanitize_rtsp_url(str(ex))
+            raise RuntimeError(message) from ex
+        finally:
+            self._close_frame_source(frame_source)
+
+        frame_timestamp = datetime.now(timezone.utc)
+        session.load_frame(
+            camera_id=camera_id,
+            frame_id=str(int(frame_timestamp.timestamp() * 1000)),
+            frame_timestamp=frame_timestamp,
+            image=frame,
+        )
+        return session
+
+    @staticmethod
+    def _close_frame_source(frame_source: Any) -> None:
+        close = getattr(frame_source, "close", None)
+        if callable(close):
+            close()

@@ -15,3 +15,5 @@ class StageDebugRecord:
     metadata_after: dict[str, Any] = field(default_factory=dict)
     input_shape: tuple[int, ...] | None = None
     output_shape: tuple[int, ...] | None = None
+    input_preview: str | None = None
+    output_preview: str | None = None

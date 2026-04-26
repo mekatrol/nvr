@@ -4,6 +4,10 @@ from collections import deque
 from copy import deepcopy
 from datetime import datetime
 from typing import Any
+import base64
+
+import cv2
+import numpy as np
 
 from nvr_common.pipeline import PipelineContext, PipelineGraph, PipelineInput
 from nvr_common.pipeline.debug.stage_debug_record import StageDebugRecord
@@ -193,6 +197,8 @@ class PipelineDebugSession:
             metadata_after=metadata_after,
             input_shape=self._shape(context.current_image),
             output_shape=self._shape(output_image),
+            input_preview=self._preview_data_url(context.current_image),
+            output_preview=self._preview_data_url(output_image),
         )
 
     def _run_stage(
@@ -217,3 +223,30 @@ class PipelineDebugSession:
     def _shape(image: Any) -> tuple[int, ...] | None:
         shape = getattr(image, "shape", None)
         return tuple(shape) if shape is not None else None
+
+    @staticmethod
+    def _preview_data_url(image: Any) -> str | None:
+        if not isinstance(image, np.ndarray):
+            return None
+
+        preview = image
+        if preview.ndim == 2:
+            preview = cv2.cvtColor(preview, cv2.COLOR_GRAY2BGR)
+        if preview.ndim != 3 or preview.shape[2] not in (3, 4):
+            return None
+
+        height, width = preview.shape[:2]
+        largest_side = max(height, width)
+        if largest_side > 640:
+            scale = 640 / largest_side
+            preview = cv2.resize(
+                preview,
+                (max(1, round(width * scale)), max(1, round(height * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+
+        success, encoded = cv2.imencode(".jpg", preview)
+        if not success:
+            return None
+        payload = base64.b64encode(encoded.tobytes()).decode("ascii")
+        return f"data:image/jpeg;base64,{payload}"

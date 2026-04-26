@@ -6,12 +6,26 @@ import cv2
 
 
 class OpenCvFrameSource:
-    def __init__(self, source: str) -> None:
+    def __init__(
+        self,
+        source: str,
+        open_timeout_milliseconds: int = 5000,
+        read_timeout_milliseconds: int = 5000,
+    ) -> None:
         self.source = source
+        self.open_timeout_milliseconds = open_timeout_milliseconds
+        self.read_timeout_milliseconds = read_timeout_milliseconds
         self._capture: Any = None
 
     def open(self) -> None:
-        self._capture = cv2.VideoCapture(self.source)
+        self._capture = cv2.VideoCapture()
+        self._capture.set(
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.open_timeout_milliseconds
+        )
+        self._capture.set(
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.read_timeout_milliseconds
+        )
+        self._capture.open(self.source)
         if not self._capture.isOpened():
             raise RuntimeError(f"unable to open frame source: {self.source}")
 

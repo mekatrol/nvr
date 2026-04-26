@@ -71,6 +71,16 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 return
             command = body.get("command")
             if command == "run":
+                try:
+                    session = self.api_state.load_camera_frame(
+                        body.get("camera_id", "")
+                    )
+                except RuntimeError as ex:
+                    self._json({"error": str(ex)}, status=502)
+                    return
+                if session is None:
+                    self._json({"error": "pipeline graph disabled"}, status=404)
+                    return
                 session.run()
             elif command == "pause":
                 session.status = "paused"

@@ -33,6 +33,8 @@ type DebugRecord = {
   status: string
   input_shape: number[] | null
   output_shape: number[] | null
+  input_preview: string | null
+  output_preview: string | null
   metadata_before: Record<string, unknown>
   metadata_after: Record<string, unknown>
 }
@@ -245,8 +247,16 @@ onMounted(() => {
             <span>{{ latestRecord?.pipeline_id }} / {{ latestRecord?.stage_id }}</span>
           </header>
           <div class="preview-surface">
-            <span>Input {{ latestRecord?.input_shape ?? [] }}</span>
-            <span>Output {{ latestRecord?.output_shape ?? [] }}</span>
+            <img
+              v-if="latestRecord?.output_preview"
+              :src="latestRecord.output_preview"
+              alt="Latest stage output preview"
+            />
+            <span v-else>No preview available</span>
+            <footer>
+              <span>Input {{ latestRecord?.input_shape ?? [] }}</span>
+              <span>Output {{ latestRecord?.output_shape ?? [] }}</span>
+            </footer>
           </div>
         </div>
 
@@ -411,11 +421,30 @@ select {
 
 .preview-surface {
   display: grid;
-  place-items: center;
+  grid-template-rows: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  justify-items: center;
   min-height: 260px;
   border: 1px dashed #9aa8b6;
   border-radius: 6px;
+  padding: 10px;
   color: #627386;
+}
+
+.preview-surface img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+
+.preview-surface footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  font-size: 12px;
 }
 
 .metadata pre {
