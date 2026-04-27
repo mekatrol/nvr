@@ -18,6 +18,7 @@ class PipelinesStore:
         self.storage_path = config.get_pipelines_storage_path()
         self.draft_path = self.storage_path / "pipelines.draft.yaml"
         self.deployed_path = self.storage_path / "pipelines.deployed.yaml"
+        self.pipeline_conf_path = config.get_pipeline_config_path()
 
     def draft_response(self) -> dict[str, Any]:
         pipelines_config = self.load_draft_pipelines()
@@ -65,11 +66,13 @@ class PipelinesStore:
             ),
             "draft_path": str(self.draft_path),
             "deployed_path": str(self.deployed_path),
+            "pipeline_conf_path": str(self.pipeline_conf_path),
             "config_path": str(self.config_path),
             "pipelines_config": pipelines_config,
             "pipelines": [
                 {
                     "id": pipeline.id,
+                    "name": getattr(pipeline, "name", pipeline.id),
                     "enabled": pipeline.enabled,
                     "required_inputs": list(pipeline.required_inputs),
                     "stages": [
@@ -78,6 +81,8 @@ class PipelinesStore:
                             "enabled": stage.enabled,
                             "module": stage.module,
                             "class_name": stage.class_name,
+                            "filename": stage.filename,
+                            "pipeline": stage.pipeline,
                             "config": deepcopy(stage.config),
                         }
                         for stage in pipeline.stages
@@ -101,37 +106,7 @@ class PipelinesStore:
 
     @staticmethod
     def _normalize_pipelines_config(raw_pipelines: dict[str, Any]) -> dict[str, Any]:
-        pipelines_config = deepcopy(raw_pipelines)
-        pipelines_config.setdefault(Config.KEY_PIPELINES_ENABLED, True)
-        pipelines_config.setdefault(Config.KEY_PIPELINE_FRAME_INTERVAL_SECONDS, 1.0)
-        pipelines_config.setdefault(Config.KEY_PIPELINES, [])
-        pipelines_config.setdefault(Config.KEY_PIPELINE_EDGES, [])
-
-        pipelines = pipelines_config.get(Config.KEY_PIPELINES)
-        if isinstance(pipelines, list):
-            for pipeline in pipelines:
-                if not isinstance(pipeline, dict):
-                    continue
-                pipeline.setdefault(Config.KEY_PIPELINE_ENABLED, True)
-                pipeline.setdefault(Config.KEY_PIPELINE_STAGES, [])
-                stages = pipeline.get(Config.KEY_PIPELINE_STAGES)
-                if not isinstance(stages, list):
-                    continue
-                for stage in stages:
-                    if not isinstance(stage, dict):
-                        continue
-                    stage.setdefault(Config.KEY_STAGE_ENABLED, True)
-                    if (
-                        Config.KEY_STAGE_CLASS not in stage
-                        and Config.KEY_STAGE_CLASS_NAME in stage
-                    ):
-                        stage[Config.KEY_STAGE_CLASS] = stage[
-                            Config.KEY_STAGE_CLASS_NAME
-                        ]
-                    stage.pop(Config.KEY_STAGE_CLASS_NAME, None)
-                    stage.setdefault(Config.KEY_STAGE_CONFIG, {})
-
-        return pipelines_config
+        return Config._normalize_pipelines_config(deepcopy(raw_pipelines))
 
     @staticmethod
     def _load_yaml(path: Path) -> dict[str, Any]:

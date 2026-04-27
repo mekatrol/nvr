@@ -11,13 +11,16 @@ type Camera = {
 type Stage = {
   id: string
   enabled: boolean
-  module: string
-  class_name: string
+  module?: string
+  class_name?: string
+  filename?: string | null
+  pipeline?: string | null
   config: Record<string, unknown>
 }
 
 type Pipeline = {
   id: string
+  name?: string
   enabled: boolean
   required_inputs: string[]
   stages: Stage[]
@@ -54,6 +57,15 @@ type PipelinesResponse = {
   edges: Edge[]
 }
 
+const iconPaths = {
+  pipeline: 'M3 5.5A2.5 2.5 0 0 1 5.5 3H9l2 2h7.5A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z',
+  stage: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5',
+  file: 'M6 3h8l4 4v14H6zM14 3v5h5',
+  link: 'M10 13a5 5 0 0 0 7.5.5l2-2A5 5 0 0 0 12.5 4l-1 1M14 11a5 5 0 0 0-7.5-.5l-2 2A5 5 0 0 0 11.5 20l1-1',
+  plus: 'M12 5v14M5 12h14',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3',
+} as const
+
 const cameras = ref<Camera[]>([])
 const selectedCameraId = ref('')
 const pipelines = ref<Pipeline[]>([])
@@ -67,12 +79,17 @@ const draftEnabled = ref(true)
 const draftFrameIntervalSeconds = ref('1.0')
 const draftPipelines = ref<Pipeline[]>([])
 const draftEdges = ref<Edge[]>([])
+const currentView = ref<'index' | 'debug'>('index')
+const debugPipelineId = ref('')
 const selectedPipelineId = ref('')
 const selectedStageId = ref('')
 const selectedPipelineIdEdit = ref('')
+const selectedPipelineNameEdit = ref('')
 const selectedStageIdEdit = ref('')
 const selectedStageModule = ref('')
 const selectedStageClassName = ref('')
+const selectedStageFilename = ref('')
+const selectedStagePipeline = ref('')
 const selectedStageConfigJson = ref('{}')
 const selectedPipelineRequiredInputs = ref('')
 const deployStatus = ref('')
@@ -82,6 +99,11 @@ const selectedCamera = computed(() =>
 )
 
 const latestRecord = computed(() => debugState.value.records?.at(-1))
+
+const visiblePipelines = computed(() => {
+  if (!debugPipelineId.value) return pipelines.value
+  return pipelines.value.filter((pipeline) => pipeline.id === debugPipelineId.value)
+})
 
 const selectedDraftPipeline = computed(() =>
   draftPipelines.value.find((pipeline) => pipeline.id === selectedPipelineId.value),
@@ -160,6 +182,7 @@ async function toggleBreakpoint(enabled: boolean) {
 
 async function refreshCamera() {
   try {
+    showPipelineIndex()
     await loadPipelines()
     await loadDebugState()
     await loadDraftPipelines()
@@ -170,6 +193,11 @@ async function refreshCamera() {
 
 async function saveDraftPipelines() {
   deployStatus.value = ''
+  const validationError = validateDraftPipelineReferences()
+  if (validationError) {
+    apiError.value = validationError
+    return
+  }
   const saved = await postJson<PipelinesResponse>('/api/pipelines/draft', toPipelinesPayload())
   draftPipelines.value = saved.pipelines
   draftEdges.value = saved.edges
@@ -228,20 +256,38 @@ function formatJson(value: unknown) {
 
 function addPipeline() {
   const baseId = uniqueId('pipeline', draftPipelines.value.map((pipeline) => pipeline.id))
-  draftPipelines.value.push({ id: baseId, enabled: true, required_inputs: [], stages: [] })
+  draftPipelines.value.push({
+    id: baseId,
+    name: baseId,
+    enabled: true,
+    required_inputs: [],
+    stages: [],
+  })
   selectPipeline(baseId)
 }
 
+function addPipelineFromTree() {
+  addPipeline()
+  currentView.value = 'debug'
+}
+
 function deleteSelectedPipeline() {
-  if (!selectedDraftPipeline.value) return
+  deletePipeline(selectedPipelineId.value)
+}
+
+function deletePipeline(pipelineId: string) {
+  if (!pipelineId) return
   draftPipelines.value = draftPipelines.value.filter(
-    (pipeline) => pipeline.id !== selectedPipelineId.value,
+    (pipeline) => pipeline.id !== pipelineId,
   )
   draftEdges.value = draftEdges.value.filter(
-    (edge) => edge.from !== selectedPipelineId.value && edge.to !== selectedPipelineId.value,
+    (edge) => edge.from !== pipelineId && edge.to !== pipelineId,
   )
   selectedPipelineId.value = draftPipelines.value[0]?.id ?? ''
   selectedStageId.value = ''
+  if (debugPipelineId.value === pipelineId) {
+    showPipelineIndex()
+  }
   refreshSelectedEditors()
 }
 
@@ -254,19 +300,30 @@ function addStage() {
   selectedDraftPipeline.value.stages.push({
     id: baseId,
     enabled: true,
-    module: 'nvr_common.pipeline.sample_stages.metadata_annotation_stage',
+    filename: 'nvr_common/pipeline/sample_stages/metadata_annotation_stage.py',
     class_name: 'MetadataAnnotationStage',
     config: { metadata: {} },
   })
   selectStage(baseId)
 }
 
+function addStageToPipeline(pipelineId: string) {
+  selectPipeline(pipelineId)
+  addStage()
+  currentView.value = 'debug'
+}
+
 function deleteSelectedStage() {
-  if (!selectedDraftPipeline.value || !selectedStageId.value) return
-  selectedDraftPipeline.value.stages = selectedDraftPipeline.value.stages.filter(
-    (stage) => stage.id !== selectedStageId.value,
-  )
-  selectedStageId.value = selectedDraftPipeline.value.stages[0]?.id ?? ''
+  deleteStage(selectedPipelineId.value, selectedStageId.value)
+}
+
+function deleteStage(pipelineId: string, stageId: string) {
+  const pipeline = draftPipelines.value.find((candidate) => candidate.id === pipelineId)
+  if (!pipeline || !stageId) return
+  pipeline.stages = pipeline.stages.filter((stage) => stage.id !== stageId)
+  if (selectedPipelineId.value === pipelineId && selectedStageId.value === stageId) {
+    selectedStageId.value = pipeline.stages[0]?.id ?? ''
+  }
   refreshSelectedEditors()
 }
 
@@ -281,6 +338,12 @@ function selectStage(stageId: string) {
   refreshSelectedEditors()
 }
 
+function selectStageInPipeline(pipelineId: string, stageId: string) {
+  selectedPipelineId.value = pipelineId
+  selectedStageId.value = stageId
+  refreshSelectedEditors()
+}
+
 function applyPipelineEdits() {
   const pipeline = selectedDraftPipeline.value
   if (!pipeline) return
@@ -288,6 +351,7 @@ function applyPipelineEdits() {
   if (!nextId) return
   const oldId = pipeline.id
   pipeline.id = nextId
+  pipeline.name = selectedPipelineNameEdit.value.trim() || nextId
   pipeline.required_inputs = selectedPipelineRequiredInputs.value
     .split(',')
     .map((input) => input.trim())
@@ -312,8 +376,10 @@ function applyStageEdits() {
   }
   apiError.value = ''
   stage.id = nextId
-  stage.module = selectedStageModule.value.trim()
-  stage.class_name = selectedStageClassName.value.trim()
+  stage.module = selectedStageModule.value.trim() || undefined
+  stage.class_name = selectedStageClassName.value.trim() || undefined
+  stage.filename = selectedStageFilename.value.trim() || undefined
+  stage.pipeline = selectedStagePipeline.value.trim() || undefined
   selectedStageId.value = nextId
 }
 
@@ -334,11 +400,14 @@ function deleteEdge(index: number) {
 function refreshSelectedEditors() {
   const pipeline = selectedDraftPipeline.value
   selectedPipelineIdEdit.value = pipeline?.id ?? ''
+  selectedPipelineNameEdit.value = pipeline?.name ?? ''
   selectedPipelineRequiredInputs.value = pipeline?.required_inputs.join(', ') ?? ''
   const stage = selectedDraftStage.value
   selectedStageIdEdit.value = stage?.id ?? ''
   selectedStageModule.value = stage?.module ?? ''
   selectedStageClassName.value = stage?.class_name ?? ''
+  selectedStageFilename.value = stage?.filename ?? ''
+  selectedStagePipeline.value = stage?.pipeline ?? ''
   selectedStageConfigJson.value = formatJson(stage?.config ?? {})
 }
 
@@ -349,19 +418,88 @@ function toPipelinesPayload() {
     frame_interval_seconds: Number.isFinite(interval) ? interval : draftFrameIntervalSeconds.value,
     pipelines: draftPipelines.value.map((pipeline) => ({
       id: pipeline.id,
+      name: pipeline.name || pipeline.id,
       enabled: pipeline.enabled,
       inputs:
         pipeline.required_inputs.length > 0 ? { required: pipeline.required_inputs } : undefined,
       stages: pipeline.stages.map((stage) => ({
         id: stage.id,
         enabled: stage.enabled,
-        module: stage.module,
-        class: stage.class_name,
+        ...(stage.pipeline ? { pipeline: stage.pipeline } : {}),
+        ...(stage.filename ? { filename: stage.filename } : {}),
+        ...(stage.module ? { module: stage.module } : {}),
+        ...(stage.class_name ? { class: stage.class_name } : {}),
         config: stage.config,
       })),
     })),
     edges: draftEdges.value,
   }
+}
+
+function stageSummary(stage: Stage) {
+  if (stage.pipeline) return `pipeline: ${stage.pipeline}`
+  if (stage.filename) return stage.filename
+  return stage.class_name || stage.module || 'stage'
+}
+
+function openPipelineDebug(pipelineId: string) {
+  debugPipelineId.value = pipelineId
+  selectedPipelineId.value = pipelineId
+  currentView.value = 'debug'
+  refreshSelectedEditors()
+}
+
+function openStageDebug(pipelineId: string, stageId: string) {
+  debugPipelineId.value = pipelineId
+  selectedPipelineId.value = pipelineId
+  selectedStageId.value = stageId
+  currentView.value = 'debug'
+  refreshSelectedEditors()
+}
+
+function showPipelineIndex() {
+  currentView.value = 'index'
+  debugPipelineId.value = ''
+}
+
+function validateDraftPipelineReferences() {
+  const pipelineIds = new Set(draftPipelines.value.map((pipeline) => pipeline.id))
+  const downstream = new Map<string, string[]>()
+  for (const pipeline of draftPipelines.value) {
+    for (const stage of pipeline.stages) {
+      if (!stage.pipeline) continue
+      if (!pipelineIds.has(stage.pipeline)) {
+        return `Stage ${pipeline.id}/${stage.id} references unknown pipeline ${stage.pipeline}`
+      }
+      if (stage.pipeline === pipeline.id) {
+        return `Stage ${pipeline.id}/${stage.id} cannot reference its own pipeline`
+      }
+      const targets = downstream.get(pipeline.id) ?? []
+      targets.push(stage.pipeline)
+      downstream.set(pipeline.id, targets)
+    }
+  }
+
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (pipelineId: string): string | null => {
+    if (visiting.has(pipelineId)) return `Pipeline reference cycle detected at ${pipelineId}`
+    if (visited.has(pipelineId)) return null
+    visiting.add(pipelineId)
+    for (const target of downstream.get(pipelineId) ?? []) {
+      const error = visit(target)
+      if (error) return error
+    }
+    visiting.delete(pipelineId)
+    visited.add(pipelineId)
+    return null
+  }
+
+  for (const pipeline of draftPipelines.value) {
+    const error = visit(pipeline.id)
+    if (error) return error
+  }
+  return ''
 }
 
 function uniqueId(prefix: string, existingIds: string[]) {
@@ -375,6 +513,7 @@ function uniqueId(prefix: string, existingIds: string[]) {
 }
 
 onMounted(() => {
+  showPipelineIndex()
   loadCameras()
     .then(refreshCamera)
     .catch(() => undefined)
@@ -400,6 +539,68 @@ onMounted(() => {
         <span>{{ selectedCamera?.enabled ? 'Recorder enabled' : 'Recorder disabled' }}</span>
         <span>{{ selectedCamera?.pipeline_enabled ? 'Pipeline enabled' : 'Pipeline disabled' }}</span>
       </div>
+
+      <section class="tree-panel">
+        <header>
+          <strong>Pipeline Tree</strong>
+          <button title="Add pipeline" @click="addPipelineFromTree">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="iconPaths.plus" />
+            </svg>
+          </button>
+        </header>
+        <div class="tree">
+          <div v-if="draftPipelines.length === 0" class="tree-empty">No pipelines</div>
+          <div v-for="pipeline in draftPipelines" :key="pipeline.id" class="tree-branch">
+            <div
+              class="tree-row"
+              :class="{ selected: pipeline.id === selectedPipelineId && !selectedStageId }"
+              @click="selectPipeline(pipeline.id)"
+              @dblclick="openPipelineDebug(pipeline.id)"
+            >
+              <span class="tree-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="iconPaths.pipeline" />
+                </svg>
+              </span>
+              <span class="tree-label">{{ pipeline.name || pipeline.id }}</span>
+              <button title="Add stage" @click.stop="addStageToPipeline(pipeline.id)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="iconPaths.plus" />
+                </svg>
+              </button>
+              <button title="Remove pipeline" @click.stop="deletePipeline(pipeline.id)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="iconPaths.trash" />
+                </svg>
+              </button>
+            </div>
+            <div class="tree-children">
+              <div
+                v-for="stage in pipeline.stages"
+                :key="stage.id"
+                class="tree-row stage"
+                :class="{ selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId }"
+                @click="selectStageInPipeline(pipeline.id, stage.id)"
+                @dblclick="openStageDebug(pipeline.id, stage.id)"
+              >
+                <span class="tree-icon">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="stage.pipeline ? iconPaths.link : stage.filename ? iconPaths.file : iconPaths.stage" />
+                  </svg>
+                </span>
+                <span class="tree-label">{{ stage.id }}</span>
+                <button title="Remove stage" @click.stop="deleteStage(pipeline.id, stage.id)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="iconPaths.trash" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div class="controls">
         <button @click="runCommand('run')">Run</button>
         <button @click="runCommand('pause')">Pause</button>
@@ -431,21 +632,48 @@ onMounted(() => {
       <p v-if="deployStatus" class="status">{{ deployStatus }}</p>
     </aside>
 
-    <section class="workspace">
+    <section v-if="currentView === 'index'" class="workspace">
       <header class="statusbar">
+        <span>Pipelines</span>
+        <span>{{ pipelines.length }} configured</span>
+      </header>
+
+      <section class="pipeline-index">
+        <article v-for="pipeline in pipelines" :key="pipeline.id" class="pipeline-card">
+          <header>
+            <div>
+              <strong>{{ pipeline.name || pipeline.id }}</strong>
+              <small>{{ pipeline.id }}</small>
+            </div>
+            <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
+          </header>
+          <div class="stage-list">
+            <div v-for="stage in pipeline.stages" :key="stage.id" class="stage-row static">
+              <span>{{ stage.id }}</span>
+              <small>{{ stageSummary(stage) }}</small>
+            </div>
+          </div>
+          <button @click="openPipelineDebug(pipeline.id)">View</button>
+        </article>
+      </section>
+    </section>
+
+    <section v-else class="workspace">
+      <header class="statusbar">
+        <button @click="showPipelineIndex">Pipelines</button>
         <span>Status: {{ debugState.status }}</span>
         <span>Step {{ debugState.cursor ?? 0 }} / {{ debugState.total_steps ?? 0 }}</span>
       </header>
 
       <section class="graph">
-        <div v-for="pipeline in pipelines" :key="pipeline.id" class="pipeline-card">
+        <div v-for="pipeline in visiblePipelines" :key="pipeline.id" class="pipeline-card">
           <header>
-            <strong>{{ pipeline.id }}</strong>
+            <strong>{{ pipeline.name || pipeline.id }}</strong>
             <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
           </header>
           <button v-for="stage in pipeline.stages" :key="stage.id" class="stage-row">
             <span>{{ stage.id }}</span>
-            <small>{{ stage.class_name }}</small>
+            <small>{{ stageSummary(stage) }}</small>
           </button>
         </div>
       </section>
@@ -495,6 +723,10 @@ onMounted(() => {
               <span>ID</span>
               <input v-model="selectedPipelineIdEdit" type="text" />
             </label>
+            <label class="field light">
+              <span>Name</span>
+              <input v-model="selectedPipelineNameEdit" type="text" />
+            </label>
             <label class="inline-field">
               <span>Enabled</span>
               <input v-if="selectedDraftPipeline" v-model="selectedDraftPipeline.enabled" type="checkbox" />
@@ -517,7 +749,7 @@ onMounted(() => {
               @click="selectStage(stage.id)"
             >
               <span>{{ stage.id }}</span>
-              <small>{{ stage.class_name }}</small>
+              <small>{{ stageSummary(stage) }}</small>
             </button>
           </section>
 
@@ -535,12 +767,25 @@ onMounted(() => {
               <input v-if="selectedDraftStage" v-model="selectedDraftStage.enabled" type="checkbox" />
             </label>
             <label class="field light">
-              <span>Module</span>
-              <input v-model="selectedStageModule" type="text" />
+              <span>Filename</span>
+              <input v-model="selectedStageFilename" type="text" />
+            </label>
+            <label class="field light">
+              <span>Pipeline reference</span>
+              <select v-model="selectedStagePipeline">
+                <option value=""></option>
+                <option v-for="pipeline in draftPipelines" :key="pipeline.id" :value="pipeline.id">
+                  {{ pipeline.id }}
+                </option>
+              </select>
             </label>
             <label class="field light">
               <span>Class</span>
               <input v-model="selectedStageClassName" type="text" />
+            </label>
+            <label class="field light">
+              <span>Legacy module</span>
+              <input v-model="selectedStageModule" type="text" />
             </label>
             <label class="field light">
               <span>Config JSON</span>
@@ -660,6 +905,7 @@ textarea {
 }
 
 .field.light input,
+.field.light select,
 .field.light textarea,
 .edge-row select {
   width: 100%;
@@ -692,6 +938,107 @@ textarea {
   font-size: 13px;
 }
 
+.tree-panel {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.tree-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.tree-panel header button,
+.tree-row button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #506070;
+  border-radius: 6px;
+  background: #223044;
+  color: #f7fafc;
+  cursor: pointer;
+}
+
+.tree-panel svg,
+.tree-row svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tree {
+  display: grid;
+  gap: 4px;
+  min-height: 80px;
+  max-height: 34vh;
+  overflow: auto;
+  border: 1px solid #304157;
+  border-radius: 8px;
+  padding: 8px;
+  background: #111b28;
+}
+
+.tree-empty {
+  color: #9fb0c3;
+  font-size: 13px;
+}
+
+.tree-branch {
+  display: grid;
+  gap: 2px;
+}
+
+.tree-children {
+  display: grid;
+  gap: 2px;
+  margin-left: 18px;
+}
+
+.tree-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border-radius: 6px;
+  padding: 2px 4px;
+  color: #e6edf5;
+  cursor: default;
+}
+
+.tree-row.stage {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+
+.tree-row:hover,
+.tree-row.selected {
+  background: #26364a;
+}
+
+.tree-icon {
+  display: inline-grid;
+  place-items: center;
+  color: #a9c7ef;
+}
+
+.tree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
 .controls,
 .breakpoint-actions {
   display: grid;
@@ -720,16 +1067,48 @@ textarea {
 
 .statusbar {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #d7dee7;
   padding-bottom: 10px;
   font-size: 14px;
 }
 
+.statusbar button,
+.pipeline-card > button {
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #1f2933;
+  cursor: pointer;
+}
+
 .graph {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+}
+
+.pipeline-index {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+.pipeline-card header div {
+  display: grid;
+  gap: 2px;
+}
+
+.pipeline-card header small {
+  color: #627386;
+}
+
+.stage-list {
+  display: grid;
+  gap: 8px;
 }
 
 .pipeline-card {
@@ -763,6 +1142,10 @@ textarea {
 .stage-row.selected {
   border-color: #2563eb;
   background: #eff6ff;
+}
+
+.stage-row.static {
+  cursor: default;
 }
 
 .editor {

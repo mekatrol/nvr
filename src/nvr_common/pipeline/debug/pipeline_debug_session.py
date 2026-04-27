@@ -73,7 +73,10 @@ class PipelineDebugSession:
 
         pipeline_id = self._steps[self._cursor][0]
         records = []
-        while self._cursor < len(self._steps) and self._steps[self._cursor][0] == pipeline_id:
+        while (
+            self._cursor < len(self._steps)
+            and self._steps[self._cursor][0] == pipeline_id
+        ):
             record = self.step()
             if record is not None:
                 records.append(record)
@@ -142,6 +145,8 @@ class PipelineDebugSession:
             )
             for stage_config in pipeline.stages:
                 if not stage_config.enabled:
+                    continue
+                if stage_config.pipeline:
                     continue
                 context = PipelineContext(
                     camera_id=camera_id,

@@ -1,0 +1,31 @@
+pipelines:
+  enabled: true
+  frame_interval_seconds: 1.0
+  pipeline:
+    - id: preprocessing
+      name: Image preprocessing
+      enabled: true
+      stages:
+        - id: example-crop
+          enabled: true
+          filename: nvr_common/pipeline/sample_stages/crop_stage.py
+          class: CropStage
+          config:
+            x: 0
+            y: 0
+            width: 640
+            height: 480
+        - id: thumbnail
+          enabled: true
+          pipeline: thumbnail
+
+    - id: thumbnail
+      name: Thumbnail generation
+      enabled: true
+      stages:
+        - id: example-thumbnail
+          enabled: true
+          filename: nvr_common/pipeline/sample_stages/resize_stage.py
+          class: ResizeStage
+          config:
+            width: 320

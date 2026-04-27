@@ -33,10 +33,13 @@ class Config(Singleton, MutableMapping):
     KEY_CAMERA_LOG_FFMPEG: str = "log_ffmpeg"
     KEY_PIPELINES_STORAGE_PATH: str = "pipelines_storage_path"
     KEY_PIPELINES_CONFIG: str = "pipelines"
+    KEY_PIPELINES_CONFIG_FILENAME: str = "pipeline_conf.yaml"
     KEY_PIPELINES_ENABLED: str = "enabled"
     KEY_PIPELINE_FRAME_INTERVAL_SECONDS: str = "frame_interval_seconds"
     KEY_PIPELINES: str = "pipelines"
+    KEY_PIPELINES_PIPELINE: str = "pipeline"
     KEY_PIPELINE_ID: str = "id"
+    KEY_PIPELINE_NAME: str = "name"
     KEY_PIPELINE_ENABLED: str = "enabled"
     KEY_PIPELINE_STAGES: str = "stages"
     KEY_PIPELINE_INPUTS: str = "inputs"
@@ -49,6 +52,8 @@ class Config(Singleton, MutableMapping):
     KEY_STAGE_MODULE: str = "module"
     KEY_STAGE_CLASS: str = "class"
     KEY_STAGE_CLASS_NAME: str = "class_name"
+    KEY_STAGE_FILENAME: str = "filename"
+    KEY_STAGE_PIPELINE: str = "pipeline"
     KEY_STAGE_CONFIG: str = "config"
 
     stream_output_path = None
@@ -114,20 +119,42 @@ class Config(Singleton, MutableMapping):
     def get_deployed_pipelines_path(self) -> Path:
         return self.get_pipelines_storage_path() / "pipelines.deployed.yaml"
 
+    def get_pipeline_config_path(self) -> Path:
+        return Path(self.config_path).with_name(self.KEY_PIPELINES_CONFIG_FILENAME)
+
     def get_pipelines_config(
         self, camera_id: str | None = None
     ) -> Dict[str, Any] | None:
-        pipelines = self._load_deployed_pipelines_config() or self._conf.get(
-            self.KEY_PIPELINES_CONFIG
+        pipelines = (
+            self._load_deployed_pipelines_config()
+            or self._load_pipeline_conf_config()
+            or self._conf.get(self.KEY_PIPELINES_CONFIG)
         )
 
         if camera_id is not None:
             camera = self.get_camera(camera_id)
             camera_pipelines = camera.get(self.KEY_PIPELINES_CONFIG)
             if camera_pipelines is not None:
-                pipelines = self._merge_pipelines_dict(
-                    pipelines, camera_pipelines
-                )
+                pipelines = self._merge_pipelines_dict(pipelines, camera_pipelines)
+
+        if not isinstance(pipelines, dict):
+            return None
+        return self._normalize_pipelines_config(pipelines)
+
+    def _load_pipeline_conf_config(self) -> Dict[str, Any] | None:
+        pipeline_conf_path = self.get_pipeline_config_path()
+        if not pipeline_conf_path.exists():
+            return None
+
+        pipeline_conf = self._load_config(str(pipeline_conf_path))
+        pipelines = self._unwrap_pipelines_config(pipeline_conf)
+
+        debug_path = pipeline_conf_path.with_name("pipeline_conf.debug.yaml")
+        if debug_path.exists():
+            debug_conf = self._load_config(str(debug_path))
+            debug_pipelines = self._unwrap_pipelines_config(debug_conf)
+            if debug_pipelines:
+                pipelines = self._merge_pipelines_dict(pipelines, debug_pipelines)
 
         return pipelines if isinstance(pipelines, dict) else None
 
@@ -137,7 +164,11 @@ class Config(Singleton, MutableMapping):
             return None
         deployed_config = self._load_config(str(deployed_path))
         pipelines = self._unwrap_pipelines_config(deployed_config)
-        return pipelines if isinstance(pipelines, dict) else None
+        return (
+            self._normalize_pipelines_config(pipelines)
+            if isinstance(pipelines, dict)
+            else None
+        )
 
     def get_pipelines(self, camera_id: str | None = None) -> PipelineGraph | None:
         pipelines = self.get_pipelines_config(camera_id)
@@ -338,9 +369,7 @@ class Config(Singleton, MutableMapping):
         return overrides
 
     @staticmethod
-    def _merge_pipelines_dict(
-        base_graph: Any, override_graph: Any
-    ) -> dict[str, Any]:
+    def _merge_pipelines_dict(base_graph: Any, override_graph: Any) -> dict[str, Any]:
         if not isinstance(base_graph, dict):
             base_graph = {}
         if not isinstance(override_graph, dict):
@@ -350,11 +379,17 @@ class Config(Singleton, MutableMapping):
         for key, override_value in override_graph.items():
             base_value = base_graph.get(key)
             if (
-                key == Config.KEY_PIPELINES
+                key in (Config.KEY_PIPELINES, Config.KEY_PIPELINES_PIPELINE)
                 and isinstance(base_value, list)
                 and isinstance(override_value, list)
             ):
                 result[key] = Config._merge_pipeline_list(base_value, override_value)
+            elif (
+                key == Config.KEY_PIPELINES
+                and isinstance(base_value, dict)
+                and isinstance(override_value, dict)
+            ):
+                result[key] = Config._merge_pipelines_dict(base_value, override_value)
             else:
                 result[key] = Config._merge_dicts(base_value, override_value)
         return result
@@ -456,6 +491,102 @@ class Config(Singleton, MutableMapping):
     def _unwrap_pipelines_config(cls, data: Dict[str, Any]) -> Dict[str, Any]:
         wrapper = data.get(cls.KEY_PIPELINES_CONFIG)
         return wrapper if isinstance(wrapper, dict) else data
+
+    @classmethod
+    def _normalize_pipelines_config(
+        cls, raw_pipelines: dict[str, Any]
+    ) -> dict[str, Any]:
+        pipelines_config = dict(raw_pipelines)
+        pipelines_config.setdefault(cls.KEY_PIPELINES_ENABLED, True)
+        pipelines_config.setdefault(cls.KEY_PIPELINE_FRAME_INTERVAL_SECONDS, 1.0)
+
+        raw_pipeline_container = pipelines_config.get(cls.KEY_PIPELINES)
+        if isinstance(raw_pipeline_container, dict):
+            raw_pipeline_list = raw_pipeline_container.get(cls.KEY_PIPELINES_PIPELINE)
+        else:
+            raw_pipeline_list = raw_pipeline_container
+
+        if cls.KEY_PIPELINES_PIPELINE in pipelines_config:
+            raw_pipeline_list = pipelines_config.get(cls.KEY_PIPELINES_PIPELINE)
+
+        pipelines_config[cls.KEY_PIPELINES] = (
+            raw_pipeline_list if isinstance(raw_pipeline_list, list) else []
+        )
+        pipelines_config.setdefault(cls.KEY_PIPELINE_EDGES, [])
+
+        for pipeline in pipelines_config[cls.KEY_PIPELINES]:
+            if not isinstance(pipeline, dict):
+                continue
+            pipeline.setdefault(cls.KEY_PIPELINE_ENABLED, True)
+            pipeline.setdefault(cls.KEY_PIPELINE_STAGES, [])
+            stages = pipeline.get(cls.KEY_PIPELINE_STAGES)
+            if not isinstance(stages, list):
+                continue
+            for stage in stages:
+                if not isinstance(stage, dict):
+                    continue
+                stage.setdefault(cls.KEY_STAGE_ENABLED, True)
+                stage.setdefault(cls.KEY_STAGE_CONFIG, {})
+                if (
+                    cls.KEY_STAGE_CLASS not in stage
+                    and cls.KEY_STAGE_CLASS_NAME in stage
+                ):
+                    stage[cls.KEY_STAGE_CLASS] = stage[cls.KEY_STAGE_CLASS_NAME]
+                stage.pop(cls.KEY_STAGE_CLASS_NAME, None)
+
+        generated_edges = cls._pipeline_reference_edges(pipelines_config)
+        explicit_edges = pipelines_config.get(cls.KEY_PIPELINE_EDGES)
+        if isinstance(explicit_edges, list):
+            edge_keys = {
+                (
+                    edge.get(cls.KEY_PIPELINE_EDGE_FROM),
+                    edge.get(cls.KEY_PIPELINE_EDGE_TO),
+                )
+                for edge in explicit_edges
+                if isinstance(edge, dict)
+            }
+            for edge in generated_edges:
+                edge_key = (
+                    edge[cls.KEY_PIPELINE_EDGE_FROM],
+                    edge[cls.KEY_PIPELINE_EDGE_TO],
+                )
+                if edge_key not in edge_keys:
+                    explicit_edges.append(edge)
+        else:
+            pipelines_config[cls.KEY_PIPELINE_EDGES] = generated_edges
+
+        return pipelines_config
+
+    @classmethod
+    def _pipeline_reference_edges(
+        cls, pipelines_config: dict[str, Any]
+    ) -> list[dict[str, str]]:
+        edges: list[dict[str, str]] = []
+        raw_pipelines = pipelines_config.get(cls.KEY_PIPELINES)
+        if not isinstance(raw_pipelines, list):
+            return edges
+
+        for pipeline in raw_pipelines:
+            if not isinstance(pipeline, dict):
+                continue
+            source = pipeline.get(cls.KEY_PIPELINE_ID)
+            if not isinstance(source, str):
+                continue
+            stages = pipeline.get(cls.KEY_PIPELINE_STAGES)
+            if not isinstance(stages, list):
+                continue
+            for stage in stages:
+                if not isinstance(stage, dict):
+                    continue
+                target = stage.get(cls.KEY_STAGE_PIPELINE)
+                if isinstance(target, str) and target:
+                    edges.append(
+                        {
+                            cls.KEY_PIPELINE_EDGE_FROM: source,
+                            cls.KEY_PIPELINE_EDGE_TO: target,
+                        }
+                    )
+        return edges
 
     def _validate_dir_path(
         self, raw_value: Any, field_label: str, errors: List[str], validate_exists: True
@@ -610,12 +741,9 @@ class Config(Singleton, MutableMapping):
         if not isinstance(ffmpeg_binary, str) or not ffmpeg_binary.strip():
             errors.append("ffmpeg_binary must be a non-empty string")
 
-        pipelines_storage_path: Any = self._conf.get(
-            self.KEY_PIPELINES_STORAGE_PATH
-        )
+        pipelines_storage_path: Any = self._conf.get(self.KEY_PIPELINES_STORAGE_PATH)
         if pipelines_storage_path is not None and (
-            not isinstance(pipelines_storage_path, str)
-            or not pipelines_storage_path
+            not isinstance(pipelines_storage_path, str) or not pipelines_storage_path
         ):
             errors.append("pipelines_storage_path must be a non-empty string")
 
@@ -689,7 +817,7 @@ class Config(Singleton, MutableMapping):
 
                 if self.KEY_PIPELINES_CONFIG in camera:
                     effective_pipelines = self._merge_pipelines_dict(
-                        self._conf.get(self.KEY_PIPELINES_CONFIG),
+                        self.get_pipelines_config(),
                         camera.get(self.KEY_PIPELINES_CONFIG),
                     )
                     self._validate_pipelines(
@@ -701,6 +829,12 @@ class Config(Singleton, MutableMapping):
         if self.KEY_PIPELINES_CONFIG in self._conf:
             self._validate_pipelines(
                 self._conf.get(self.KEY_PIPELINES_CONFIG), "pipelines", errors
+            )
+
+        pipeline_conf = self._load_pipeline_conf_config()
+        if pipeline_conf is not None:
+            self._validate_pipelines(
+                pipeline_conf, f"{self.get_pipeline_config_path()} pipelines", errors
             )
 
         deployed_pipelines = self._load_deployed_pipelines_config()
@@ -721,6 +855,7 @@ class Config(Singleton, MutableMapping):
         if not isinstance(raw_pipelines_config, dict):
             errors.append(f"{field_label} must be a dictionary value")
             return
+        raw_pipelines_config = self._normalize_pipelines_config(raw_pipelines_config)
 
         enabled = raw_pipelines_config.get(self.KEY_PIPELINES_ENABLED)
         if not isinstance(enabled, bool):
@@ -755,6 +890,7 @@ class Config(Singleton, MutableMapping):
 
     @classmethod
     def _parse_pipelines(cls, raw_pipelines_config: dict[str, Any]) -> PipelineGraph:
+        raw_pipelines_config = cls._normalize_pipelines_config(raw_pipelines_config)
         raw_pipelines = raw_pipelines_config.get(cls.KEY_PIPELINES)
         raw_edges = raw_pipelines_config.get(cls.KEY_PIPELINE_EDGES)
         if not isinstance(raw_pipelines, list):
@@ -780,6 +916,11 @@ class Config(Singleton, MutableMapping):
         pipeline_id = cls._required_non_empty_string(
             raw_pipeline, cls.KEY_PIPELINE_ID, f"pipeline at index {index}"
         )
+        pipeline_name = raw_pipeline.get(cls.KEY_PIPELINE_NAME, pipeline_id)
+        if not isinstance(pipeline_name, str) or not pipeline_name:
+            raise ValueError(
+                f"pipeline '{pipeline_id}' name must be a non-empty string"
+            )
         enabled = cls._required_bool(
             raw_pipeline, cls.KEY_PIPELINE_ENABLED, f"pipeline '{pipeline_id}'"
         )
@@ -794,6 +935,7 @@ class Config(Singleton, MutableMapping):
         )
         return NamedPipeline(
             id=pipeline_id,
+            name=pipeline_name,
             stages=stages,
             enabled=enabled,
             required_inputs=required_inputs,
@@ -834,15 +976,31 @@ class Config(Singleton, MutableMapping):
             raw_stage, cls.KEY_STAGE_ID, stage_label
         )
         enabled = cls._required_bool(raw_stage, cls.KEY_STAGE_ENABLED, stage_label)
-        module = cls._required_non_empty_string(
-            raw_stage, cls.KEY_STAGE_MODULE, f"stage '{stage_id}'"
-        )
+        filename = raw_stage.get(cls.KEY_STAGE_FILENAME)
+        pipeline = raw_stage.get(cls.KEY_STAGE_PIPELINE)
+        module = raw_stage.get(cls.KEY_STAGE_MODULE, "")
+
+        has_filename = isinstance(filename, str) and bool(filename)
+        has_pipeline = isinstance(pipeline, str) and bool(pipeline)
+        has_module = isinstance(module, str) and bool(module)
+
+        if sum((has_filename, has_pipeline, has_module)) != 1:
+            raise ValueError(
+                f"stage '{stage_id}' must define exactly one of "
+                "'filename', 'pipeline', or 'module'"
+            )
 
         class_name = raw_stage.get(cls.KEY_STAGE_CLASS)
         if class_name is None:
             class_name = raw_stage.get(cls.KEY_STAGE_CLASS_NAME)
-        if not isinstance(class_name, str) or not class_name:
+        if has_module and (not isinstance(class_name, str) or not class_name):
             raise ValueError(f"stage '{stage_id}' must have a non-empty 'class'")
+        if (
+            has_filename
+            and class_name is not None
+            and (not isinstance(class_name, str) or not class_name)
+        ):
+            raise ValueError(f"stage '{stage_id}' class must be a non-empty string")
 
         config = raw_stage.get(cls.KEY_STAGE_CONFIG, {})
         if not isinstance(config, dict):
@@ -850,9 +1008,11 @@ class Config(Singleton, MutableMapping):
 
         return PipelineStageConfig(
             id=stage_id,
-            module=module,
-            class_name=class_name,
             enabled=enabled,
+            module=module if has_module else "",
+            class_name=class_name if isinstance(class_name, str) else "",
+            filename=filename if has_filename else None,
+            pipeline=pipeline if has_pipeline else None,
             config=config,
         )
 

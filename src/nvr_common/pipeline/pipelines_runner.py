@@ -96,6 +96,8 @@ class PipelineGraphRunner:
         for stage_config in pipeline.stages:
             if not stage_config.enabled:
                 continue
+            if stage_config.pipeline:
+                continue
 
             stage = self._load_stage(pipeline_id, stage_config)
             context = PipelineContext(
