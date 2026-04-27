@@ -226,28 +226,6 @@ class ConfigPipelineGraphTest(unittest.TestCase):
             ):
                 Config()
 
-    def test_rejects_fan_in_without_required_inputs(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_data = self._base_config()
-            config_data["pipelines"]["pipelines"].append(
-                {"id": "detection", "enabled": True, "stages": []}
-            )
-            config_data["pipelines"]["pipelines"].append(
-                {"id": "post_processing", "enabled": True, "stages": []}
-            )
-            config_data["pipelines"]["edges"] = [
-                {"from": "preprocessing", "to": "thumbnail"},
-                {"from": "preprocessing", "to": "detection"},
-                {"from": "thumbnail", "to": "post_processing"},
-                {"from": "detection", "to": "post_processing"},
-            ]
-            config_path = Path(temp_dir) / "config.yaml"
-            self._write_config(config_path, config_data)
-            os.environ["NVR_CONFIG"] = str(config_path)
-
-            with self.assertRaisesRegex(ValueError, "inputs.required for fan-in"):
-                Config()
-
     @staticmethod
     def _reset_config_singleton():
         if hasattr(Config, "_instance"):
@@ -288,7 +266,6 @@ class ConfigPipelineGraphTest(unittest.TestCase):
                     },
                     {"id": "thumbnail", "enabled": True, "stages": []},
                 ],
-                "edges": [{"from": "preprocessing", "to": "thumbnail"}],
             },
             "cameras": [
                 {

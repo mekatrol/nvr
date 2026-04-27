@@ -52,7 +52,6 @@ class DebugApiState:
                 "enabled": False,
                 "integrity": integrity,
                 "pipelines": [],
-                "edges": [],
             }
         return {
             "enabled": True,
@@ -62,7 +61,6 @@ class DebugApiState:
                     "id": pipeline.id,
                     "name": getattr(pipeline, "name", pipeline.id),
                     "enabled": pipeline.enabled,
-                    "required_inputs": pipeline.required_inputs,
                     "stages": [
                         {
                             "id": stage.id,
@@ -78,7 +76,6 @@ class DebugApiState:
                 }
                 for pipeline in graph.pipelines
             ],
-            "edges": [{"from": edge.source, "to": edge.target} for edge in graph.edges],
         }
 
     def session(

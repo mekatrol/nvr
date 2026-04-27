@@ -34,13 +34,14 @@ class PipelineGraphRunner:
         frame_timestamp: datetime | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, PipelineOutput]:
-        pipeline_by_id = self.graph.pipeline_by_id()
-        pending_inputs: dict[str, dict[str, PipelineInput]] = {}
         outputs: dict[str, PipelineOutput] = {}
-
         source_metadata = deepcopy(metadata or {})
+
         for pipeline_id in self.graph.source_pipeline_ids():
-            pending_inputs[pipeline_id] = {
+            pipeline = self.graph.pipeline_by_id()[pipeline_id]
+            if not pipeline.enabled:
+                continue
+            upstream_inputs = {
                 "__source__": PipelineInput(
                     original_image=image,
                     current_image=image,
@@ -50,41 +51,20 @@ class PipelineGraphRunner:
                     frame_timestamp=frame_timestamp,
                 )
             }
-
-        for pipeline_id in self.graph.topological_pipeline_ids():
-            pipeline = pipeline_by_id[pipeline_id]
-            upstream_inputs = pending_inputs.get(pipeline_id, {})
-            if not pipeline.enabled or not upstream_inputs:
-                continue
-
-            required_inputs = pipeline.required_inputs or self.graph.upstream_ids(
-                pipeline_id
-            )
-            if required_inputs and not all(
-                upstream_id in upstream_inputs for upstream_id in required_inputs
-            ):
-                continue
-
-            output = self._run_pipeline(pipeline_id, upstream_inputs)
+            output = self._run_pipeline(pipeline_id, upstream_inputs, set())
             outputs[pipeline_id] = output
-
-            for downstream_id in self.graph.downstream_ids(pipeline_id):
-                downstream_inputs = pending_inputs.setdefault(downstream_id, {})
-                downstream_inputs[pipeline_id] = PipelineInput(
-                    original_image=image,
-                    current_image=output.output_image,
-                    metadata=deepcopy(output.metadata),
-                    camera_id=camera_id,
-                    frame_id=frame_id,
-                    frame_timestamp=frame_timestamp,
-                    source_pipeline_id=pipeline_id,
-                )
 
         return outputs
 
     def _run_pipeline(
-        self, pipeline_id: str, upstream_inputs: dict[str, PipelineInput]
+        self,
+        pipeline_id: str,
+        upstream_inputs: dict[str, PipelineInput],
+        active_pipeline_ids: set[str],
     ) -> PipelineOutput:
+        if pipeline_id in active_pipeline_ids:
+            raise ValueError(f"pipeline reference cycle detected at {pipeline_id}")
+        active_pipeline_ids.add(pipeline_id)
         pipeline = self.graph.pipeline_by_id()[pipeline_id]
         first_input = next(iter(upstream_inputs.values()))
         current_image = first_input.current_image
@@ -97,6 +77,25 @@ class PipelineGraphRunner:
             if not stage_config.enabled:
                 continue
             if stage_config.pipeline:
+                nested_output = self._run_pipeline(
+                    stage_config.pipeline,
+                    {
+                        pipeline_id: PipelineInput(
+                            original_image=first_input.original_image,
+                            current_image=current_image,
+                            metadata=deepcopy(metadata),
+                            camera_id=first_input.camera_id,
+                            frame_id=first_input.frame_id,
+                            frame_timestamp=first_input.frame_timestamp,
+                            source_pipeline_id=pipeline_id,
+                        )
+                    },
+                    active_pipeline_ids,
+                )
+                current_image = nested_output.output_image
+                metadata.update(deepcopy(nested_output.metadata))
+                debug_artifacts.update(deepcopy(nested_output.debug_artifacts))
+                events.extend(nested_output.events)
                 continue
 
             stage = self._load_stage(pipeline_id, stage_config)
@@ -126,7 +125,7 @@ class PipelineGraphRunner:
             debug_artifacts.update(deepcopy(result.debug_artifacts))
             events.extend(result.events)
 
-        return PipelineOutput(
+        output = PipelineOutput(
             pipeline_id=pipeline_id,
             output_image=current_image,
             metadata=metadata,
@@ -137,6 +136,8 @@ class PipelineGraphRunner:
             frame_id=first_input.frame_id,
             frame_timestamp=first_input.frame_timestamp,
         )
+        active_pipeline_ids.remove(pipeline_id)
+        return output
 
     @staticmethod
     def _initial_metadata(upstream_inputs: dict[str, PipelineInput]) -> dict[str, Any]:

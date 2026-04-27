@@ -11,4 +11,3 @@ class NamedPipeline:
     name: str = ""
     stages: tuple[PipelineStageConfig, ...] = field(default_factory=tuple)
     enabled: bool = True
-    required_inputs: tuple[str, ...] = field(default_factory=tuple)

@@ -25,13 +25,7 @@ type Pipeline = {
   id: string
   name?: string
   enabled: boolean
-  required_inputs: string[]
   stages: Stage[]
-}
-
-type Edge = {
-  from: string
-  to: string
 }
 
 type PipelineFileTreeNode = {
@@ -77,7 +71,6 @@ type PipelinesResponse = {
   selected_pipeline_config_path?: string
   pipeline_file_tree?: PipelineFileTreeNode[]
   pipelines: Pipeline[]
-  edges: Edge[]
 }
 
 type LogEntry = {
@@ -110,7 +103,6 @@ const cameras = ref<Camera[]>([])
 const defaultPipelineFrameIntervalSeconds = 0.5
 const selectedCameraId = ref('')
 const pipelines = ref<Pipeline[]>([])
-const edges = ref<Edge[]>([])
 const debugState = ref<DebugState>({ status: 'idle', records: [] })
 const metadata = ref<Record<string, unknown>>({})
 const selectedBreakpoint = ref('')
@@ -119,7 +111,6 @@ const isLoadingCameras = ref(false)
 const pipelineConfigEnabled = ref(true)
 const pipelineConfigFrameIntervalSeconds = ref(String(defaultPipelineFrameIntervalSeconds))
 const pipelineConfigPipelines = ref<Pipeline[]>([])
-const pipelineConfigEdges = ref<Edge[]>([])
 const pipelineFileTree = ref<PipelineFileTreeNode[]>([])
 const selectedPipelineConfigPath = ref('')
 const pipelineIntegrity = ref<PipelineIntegrity>({ ok: true, issues: [] })
@@ -135,7 +126,6 @@ const selectedStageClassName = ref('')
 const selectedStageFilename = ref('')
 const selectedStagePipeline = ref('')
 const selectedStageConfigJson = ref('{}')
-const selectedPipelineRequiredInputs = ref('')
 const deployStatus = ref('')
 const logEntries = ref<LogEntry[]>([])
 const selectedLogSeverities = ref<LogSeverity[]>([...logSeverityOptions])
@@ -202,9 +192,6 @@ const canStep = computed(
 const canEditPipelines = computed(() => !isRunLoopActive.value && !isActionBusy.value)
 const canApplyPipeline = computed(() => canEditPipelines.value && hasPipelinesPipeline.value)
 const canApplyStage = computed(() => canEditPipelines.value && hasPipelinesStage.value)
-const canAddEdge = computed(
-  () => canEditPipelines.value && pipelineConfigPipelines.value.length >= 2,
-)
 const canSetBreakpoint = computed(
   () =>
     hasSelectedCamera.value &&
@@ -233,7 +220,6 @@ async function loadPipelines() {
   const pathQuery = pipelineConfigPathQuery()
   const graph = await getJson<{
     pipelines: Pipeline[]
-    edges: Edge[]
     integrity?: PipelineIntegrity
   }>(
     `/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`,
@@ -243,11 +229,9 @@ async function loadPipelines() {
 
 function applyPipelineGraph(graph: {
   pipelines: Pipeline[]
-  edges: Edge[]
   integrity?: PipelineIntegrity
 }) {
   pipelines.value = graph.pipelines
-  edges.value = graph.edges
   pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
 }
 
@@ -260,7 +244,6 @@ async function loadPipelineConfigPipelines() {
   pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
   pipelineFileTree.value = graph.pipeline_file_tree ?? []
   pipelineConfigPipelines.value = graph.pipelines
-  pipelineConfigEdges.value = graph.edges
   if (!selectedPipelineId.value && pipelineConfigPipelines.value[0]) {
     selectPipeline(pipelineConfigPipelines.value[0].id)
   } else {
@@ -270,10 +253,7 @@ async function loadPipelineConfigPipelines() {
 
 async function reloadPipelines() {
   await stopRunLoop(false)
-  await postJson<{ pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }>(
-    '/api/pipelines/reload',
-    {},
-  )
+  await postJson<{ pipelines: Pipeline[]; integrity?: PipelineIntegrity }>('/api/pipelines/reload', {})
   await loadPipelines()
   await loadPipelineConfigPipelines()
   await loadDebugState()
@@ -412,7 +392,6 @@ async function savePipelineConfigPipelines() {
     toPipelinesPayload(),
   )
   pipelineConfigPipelines.value = saved.pipelines
-  pipelineConfigEdges.value = saved.edges
   pipelineFileTree.value = saved.pipeline_file_tree ?? pipelineFileTree.value
   refreshSelectedEditors()
   deployStatus.value = 'Pipelines saved'
@@ -432,7 +411,6 @@ async function deployPipelineConfigPipelines() {
   await savePipelineConfigPipelines()
   const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
-  edges.value = deployed.edges
   pipelineFileTree.value = deployed.pipeline_file_tree ?? pipelineFileTree.value
   await loadDebugState()
   deployStatus.value = 'Pipelines deployed and server config reloaded'
@@ -446,7 +424,6 @@ async function generateExampleResizePipeline() {
   )
   pipelineFileTree.value = generated.pipeline_file_tree ?? []
   pipelineConfigPipelines.value = generated.pipelines
-  pipelineConfigEdges.value = generated.edges
   selectPipeline('example-resize')
   deployStatus.value =
     'Example resize pipeline generated. Use Debugger to run it, or deploy pipelines when ready.'
@@ -455,7 +432,6 @@ async function generateExampleResizePipeline() {
 async function deployPipelinesFromEditor() {
   const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
-  edges.value = deployed.edges
   pipelineFileTree.value = deployed.pipeline_file_tree ?? pipelineFileTree.value
   deployStatus.value = 'Pipelines deployed and server config reloaded'
 }
@@ -521,7 +497,6 @@ function addPipeline() {
     id: baseId,
     name: baseId,
     enabled: true,
-    required_inputs: [],
     stages: [],
   })
   selectPipeline(baseId)
@@ -540,9 +515,6 @@ function deletePipeline(pipelineId: string) {
   if (!pipelineId) return
   pipelineConfigPipelines.value = pipelineConfigPipelines.value.filter(
     (pipeline) => pipeline.id !== pipelineId,
-  )
-  pipelineConfigEdges.value = pipelineConfigEdges.value.filter(
-    (edge) => edge.from !== pipelineId && edge.to !== pipelineId,
   )
   selectedPipelineId.value = pipelineConfigPipelines.value[0]?.id ?? ''
   selectedStageId.value = ''
@@ -613,14 +585,6 @@ function applyPipelineEdits() {
   const oldId = pipeline.id
   pipeline.id = nextId
   pipeline.name = selectedPipelineNameEdit.value.trim() || nextId
-  pipeline.required_inputs = selectedPipelineRequiredInputs.value
-    .split(',')
-    .map((input) => input.trim())
-    .filter((input) => input.length > 0)
-  for (const edge of pipelineConfigEdges.value) {
-    if (edge.from === oldId) edge.from = nextId
-    if (edge.to === oldId) edge.to = nextId
-  }
   selectedPipelineId.value = nextId
 }
 
@@ -659,25 +623,10 @@ async function applyStageEdits() {
   }
 }
 
-function addEdge() {
-  if (pipelineConfigPipelines.value.length < 2) return
-  const sourcePipeline = pipelineConfigPipelines.value[0]
-  const targetPipeline = pipelineConfigPipelines.value[1]
-  if (!sourcePipeline || !targetPipeline) return
-  const from = sourcePipeline.id
-  const to = targetPipeline.id
-  pipelineConfigEdges.value.push({ from, to })
-}
-
-function deleteEdge(index: number) {
-  pipelineConfigEdges.value.splice(index, 1)
-}
-
 function refreshSelectedEditors() {
   const pipeline = selectedPipelinesPipeline.value
   selectedPipelineIdEdit.value = pipeline?.id ?? ''
   selectedPipelineNameEdit.value = pipeline?.name ?? ''
-  selectedPipelineRequiredInputs.value = pipeline?.required_inputs.join(', ') ?? ''
   const stage = selectedPipelinesStage.value
   selectedStageIdEdit.value = stage?.id ?? ''
   selectedStageModule.value = stage?.module ?? ''
@@ -698,8 +647,6 @@ function toPipelinesPayload() {
       id: pipeline.id,
       name: pipeline.name || pipeline.id,
       enabled: pipeline.enabled,
-      inputs:
-        pipeline.required_inputs.length > 0 ? { required: pipeline.required_inputs } : undefined,
       stages: pipeline.stages.map((stage) => ({
         id: stage.id,
         enabled: stage.enabled,
@@ -710,7 +657,6 @@ function toPipelinesPayload() {
         config: stage.config,
       })),
     })),
-    edges: pipelineConfigEdges.value,
   }
 }
 
@@ -1394,10 +1340,6 @@ onBeforeUnmount(() => {
                     type="checkbox"
                   />
                 </label>
-                <label class="field light">
-                  <span>Required inputs</span>
-                  <input v-model="selectedPipelineRequiredInputs" type="text" />
-                </label>
                 <button :disabled="!canApplyPipeline" @click="applyPipelineEdits">
                   Apply Pipeline
                 </button>
@@ -1467,33 +1409,6 @@ onBeforeUnmount(() => {
                 <button :disabled="!canApplyStage" @click="applyStageEdits">Apply Stage</button>
               </section>
 
-              <section class="editor-panel">
-                <header>
-                  <strong>Edges</strong>
-                  <button :disabled="!canAddEdge" @click="addEdge">Add</button>
-                </header>
-                <div v-for="(edge, index) in pipelineConfigEdges" :key="index" class="edge-row">
-                  <select v-model="edge.from">
-                    <option
-                      v-for="pipeline in pipelineConfigPipelines"
-                      :key="pipeline.id"
-                      :value="pipeline.id"
-                    >
-                      {{ pipeline.id }}
-                    </option>
-                  </select>
-                  <select v-model="edge.to">
-                    <option
-                      v-for="pipeline in pipelineConfigPipelines"
-                      :key="pipeline.id"
-                      :value="pipeline.id"
-                    >
-                      {{ pipeline.id }}
-                    </option>
-                  </select>
-                  <button :disabled="!canEditPipelines" @click="deleteEdge(index)">Delete</button>
-                </div>
-              </section>
             </div>
           </section>
 
@@ -1520,7 +1435,6 @@ onBeforeUnmount(() => {
             <div class="metadata">
               <header>
                 <strong>Metadata</strong>
-                <span>{{ edges.length }} edges</span>
               </header>
               <pre>{{ formatJson(metadata) }}</pre>
             </div>
@@ -1647,8 +1561,7 @@ button:disabled .material-symbols-outlined {
 
 .field.light input,
 .field.light select,
-.field.light textarea,
-.edge-row select {
+.field.light textarea {
   width: 100%;
   border: 1px solid #b8c2cc;
   border-radius: 6px;
@@ -1992,8 +1905,7 @@ button:disabled .material-symbols-outlined {
 }
 
 .editor-actions button,
-.editor-panel button,
-.edge-row button {
+.editor-panel button {
   border: 1px solid #b8c2cc;
   border-radius: 6px;
   padding: 8px 10px;
@@ -2004,7 +1916,7 @@ button:disabled .material-symbols-outlined {
 
 .editor-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 12px;
 }
 
@@ -2024,12 +1936,6 @@ button:disabled .material-symbols-outlined {
   justify-content: space-between;
   gap: 10px;
   font-size: 13px;
-}
-
-.edge-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 8px;
 }
 
 .details {

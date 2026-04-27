@@ -4,7 +4,6 @@ import numpy as np
 
 from nvr_common.pipeline import (
     NamedPipeline,
-    PipelineEdge,
     PipelineGraph,
     PipelineGraphRunner,
     PipelineStageConfig,
@@ -39,16 +38,11 @@ class EndToEndPipelineScenarioTest(unittest.TestCase):
             metadata={"detections": [{"bbox": (22, 18, 8, 8), "track_id": "person-1"}]},
         )
 
-        self.assertNotIn("mqtt", first_outputs)
-        self.assertEqual((20, 30, 3), second_outputs["preprocessing"].output_image.shape)
-        self.assertEqual((10, 15, 3), second_outputs["thumbnail"].output_image.shape)
-        self.assertEqual(
-            ("object_detection", "thumbnail"),
-            second_outputs["post_processing"].metadata["merged_upstream_ids"],
-        )
-        self.assertTrue(second_outputs["approach_detection"].metadata["person_approaching"]["active"])
-        self.assertTrue(second_outputs["mqtt_events"].metadata["mqtt"]["published"])
-        self.assertNotIn("mqtt", third_outputs["mqtt_events"].metadata)
+        self.assertNotIn("mqtt", first_outputs["scenario"].metadata)
+        self.assertEqual((10, 15, 3), second_outputs["scenario"].output_image.shape)
+        self.assertTrue(second_outputs["scenario"].metadata["person_approaching"]["active"])
+        self.assertTrue(second_outputs["scenario"].metadata["mqtt"]["published"])
+        self.assertNotIn("mqtt", third_outputs["scenario"].metadata)
         self.assertEqual(1, len(clients))
         self.assertEqual("nvr/driveway/person-approaching", clients[0].published_topic)
 
@@ -71,10 +65,7 @@ class EndToEndPipelineScenarioTest(unittest.TestCase):
         self.assertEqual((40, 60, 3), crop_record.input_shape)
         self.assertEqual((20, 30, 3), crop_record.output_shape)
         self.assertEqual((10, 15, 3), thumbnail_record.output_shape)
-        self.assertEqual(
-            ("object_detection", "thumbnail"),
-            post_record.metadata_after["merged_upstream_ids"],
-        )
+        self.assertEqual(("scenario",), post_record.metadata_after["merged_upstream_ids"])
 
     @staticmethod
     def _client_factory(clients):
@@ -128,7 +119,6 @@ class EndToEndPipelineScenarioTest(unittest.TestCase):
                 ),
                 NamedPipeline(
                     id="post_processing",
-                    required_inputs=("object_detection", "thumbnail"),
                     stages=(
                         PipelineStageConfig(
                             id="combine-results",
@@ -172,14 +162,17 @@ class EndToEndPipelineScenarioTest(unittest.TestCase):
                         ),
                     ),
                 ),
-            ),
-            edges=(
-                PipelineEdge("preprocessing", "object_detection"),
-                PipelineEdge("preprocessing", "thumbnail"),
-                PipelineEdge("object_detection", "post_processing"),
-                PipelineEdge("thumbnail", "post_processing"),
-                PipelineEdge("post_processing", "approach_detection"),
-                PipelineEdge("approach_detection", "mqtt_events"),
+                NamedPipeline(
+                    id="scenario",
+                    stages=(
+                        PipelineStageConfig(id="preprocessing", pipeline="preprocessing"),
+                        PipelineStageConfig(id="object-detection", pipeline="object_detection"),
+                        PipelineStageConfig(id="thumbnail", pipeline="thumbnail"),
+                        PipelineStageConfig(id="post-processing", pipeline="post_processing"),
+                        PipelineStageConfig(id="approach-detection", pipeline="approach_detection"),
+                        PipelineStageConfig(id="mqtt-events", pipeline="mqtt_events"),
+                    ),
+                ),
             ),
         )
 

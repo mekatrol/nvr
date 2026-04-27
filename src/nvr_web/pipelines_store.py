@@ -108,16 +108,15 @@ class PipelinesStore:
             self._log_error("Pipeline config parse failed: %s", ex)
             raise
         self._log_info(
-            "Parsed pipeline config: %s pipelines, %s edges",
+            "Parsed pipeline config: %s pipelines",
             len(graph.pipelines),
-            len(graph.edges),
         )
         return graph
 
     def deployed_response(self) -> dict[str, Any]:
         pipelines_config = self.config.get_pipelines_config()
         if not pipelines_config:
-            return {"enabled": False, "pipelines": [], "edges": []}
+            return {"enabled": False, "pipelines": []}
         return self.pipelines_response(pipelines_config, self.deployed_path, self.deployed_dir)
 
     def load_pipeline_config_pipelines(self) -> dict[str, Any]:
@@ -131,7 +130,6 @@ class PipelinesStore:
                     self.DEFAULT_FRAME_INTERVAL_SECONDS
                 ),
                 Config.KEY_PIPELINES: [],
-                Config.KEY_PIPELINE_EDGES: [],
             }
 
         return self._normalize_pipelines_config(pipelines_config)
@@ -220,9 +218,8 @@ class PipelinesStore:
         )
         graph = Config._parse_pipelines(graph_config)
         self._log_info(
-            "Parsed pipeline response: %s pipelines, %s edges",
+            "Parsed pipeline response: %s pipelines",
             len(graph.pipelines),
-            len(graph.edges),
         )
         integrity = self.pipeline_integrity(
             None
@@ -250,7 +247,6 @@ class PipelinesStore:
                     "id": pipeline.id,
                     "name": getattr(pipeline, "name", pipeline.id),
                     "enabled": pipeline.enabled,
-                    "required_inputs": list(pipeline.required_inputs),
                     "stages": [
                         {
                             "id": stage.id,
@@ -266,7 +262,6 @@ class PipelinesStore:
                 }
                 for pipeline in graph.pipelines
             ],
-            "edges": [{"from": edge.source, "to": edge.target} for edge in graph.edges],
         }
 
     def pipeline_file_tree(self) -> list[dict[str, Any]]:
@@ -331,15 +326,15 @@ class PipelinesStore:
         return graph
 
     def _log_info(self, msg: str, *args: Any) -> None:
-        if self.logger is not None:
+        if self.logger is not None and hasattr(self.logger, "info"):
             self.logger.info(msg, *args)
 
     def _log_error(self, msg: str, *args: Any) -> None:
-        if self.logger is not None:
+        if self.logger is not None and hasattr(self.logger, "error"):
             self.logger.error(msg, *args)
 
     def _log_warning(self, msg: str, *args: Any) -> None:
-        if self.logger is not None:
+        if self.logger is not None and hasattr(self.logger, "warning"):
             self.logger.warning(msg, *args)
 
     @staticmethod
@@ -519,9 +514,6 @@ class PipelinesStore:
             config = deepcopy(config)
 
         merged_pipelines = list(config.get(Config.KEY_PIPELINES, []))
-        merged_edges = list(config.get(Config.KEY_PIPELINE_EDGES, []))
-        path_reference_targets: dict[str, str] = {}
-
         for pipeline in list(merged_pipelines):
             if not isinstance(pipeline, dict):
                 continue
@@ -560,36 +552,10 @@ class PipelinesStore:
 
                 child_pipeline_id = child_sources[0]
                 stage["pipeline"] = child_pipeline_id
-                path_reference_targets[pipeline_reference] = child_pipeline_id
                 for child_pipeline in expanded_child.get(Config.KEY_PIPELINES, []):
                     merged_pipelines.append(child_pipeline)
-                for child_edge in expanded_child.get(Config.KEY_PIPELINE_EDGES, []):
-                    merged_edges.append(child_edge)
-
-        for edge in merged_edges:
-            if not isinstance(edge, dict):
-                continue
-            target = edge.get(Config.KEY_PIPELINE_EDGE_TO)
-            if isinstance(target, str) and target in path_reference_targets:
-                edge[Config.KEY_PIPELINE_EDGE_TO] = path_reference_targets[target]
-            source = edge.get(Config.KEY_PIPELINE_EDGE_FROM)
-            if isinstance(source, str) and source in path_reference_targets:
-                edge[Config.KEY_PIPELINE_EDGE_FROM] = path_reference_targets[source]
 
         config[Config.KEY_PIPELINES] = merged_pipelines
-        config[Config.KEY_PIPELINE_EDGES] = [
-            edge
-            for edge in merged_edges
-            if not (
-                isinstance(edge, dict)
-                and (
-                    self._is_yaml_path(str(edge.get(Config.KEY_PIPELINE_EDGE_FROM, "")))
-                    or self._is_yaml_path(
-                        str(edge.get(Config.KEY_PIPELINE_EDGE_TO, ""))
-                    )
-                )
-            )
-        ]
         return self._normalize_pipelines_config(config)
 
     def _validate_stage_filenames_under(

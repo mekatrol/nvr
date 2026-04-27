@@ -1,6 +1,5 @@
 from nvr_common.pipeline.named_pipeline import NamedPipeline
 from nvr_common.pipeline.pipeline_context import PipelineContext
-from nvr_common.pipeline.pipeline_edge import PipelineEdge
 from nvr_common.pipeline.pipelines import PipelineGraph
 from nvr_common.pipeline.pipelines_runner import PipelineGraphRunner
 from nvr_common.pipeline.pipeline_input import PipelineInput
@@ -14,7 +13,6 @@ from nvr_common.pipeline.pipeline_validation_error import PipelineValidationErro
 __all__ = [
     "NamedPipeline",
     "PipelineContext",
-    "PipelineEdge",
     "PipelineGraph",
     "PipelineGraphRunner",
     "PipelineInput",

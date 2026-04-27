@@ -123,8 +123,11 @@ class PipelineDebugSession:
         metadata: dict[str, Any],
     ) -> list[tuple[str, Any, PipelineContext]]:
         steps = []
-        pending_inputs = {
-            pipeline_id: {
+        for pipeline_id in self.graph.source_pipeline_ids():
+            pipeline = self.graph.pipeline_by_id()[pipeline_id]
+            if not pipeline.enabled:
+                continue
+            upstream_inputs = {
                 "__source__": PipelineInput(
                     original_image=image,
                     current_image=image,
@@ -134,16 +137,33 @@ class PipelineDebugSession:
                     frame_timestamp=frame_timestamp,
                 )
             }
-            for pipeline_id in self.graph.source_pipeline_ids()
-        }
-        pipeline_by_id = self.graph.pipeline_by_id()
+            self._append_pipeline_steps(
+                steps,
+                pipeline_id,
+                upstream_inputs,
+                camera_id,
+                frame_id,
+                frame_timestamp,
+                set(),
+            )
 
-        for pipeline_id in self.graph.topological_pipeline_ids():
-            pipeline = pipeline_by_id[pipeline_id]
-            upstream_inputs = pending_inputs.get(pipeline_id, {})
-            if not pipeline.enabled or not upstream_inputs:
-                continue
+        return steps
 
+    def _append_pipeline_steps(
+        self,
+        steps: list[tuple[str, Any, PipelineContext]],
+        pipeline_id: str,
+        upstream_inputs: dict[str, PipelineInput],
+        camera_id: str,
+        frame_id: str,
+        frame_timestamp: datetime | None,
+        active_pipeline_ids: set[str],
+    ) -> tuple[Any, dict[str, Any]]:
+        if pipeline_id in active_pipeline_ids:
+            raise ValueError(f"pipeline reference cycle detected at {pipeline_id}")
+        active_pipeline_ids.add(pipeline_id)
+        pipeline = self.graph.pipeline_by_id()[pipeline_id]
+        if pipeline.enabled:
             first_input = next(iter(upstream_inputs.values()))
             current_image = first_input.current_image
             branch_metadata = (
@@ -153,6 +173,25 @@ class PipelineDebugSession:
                 if not stage_config.enabled:
                     continue
                 if stage_config.pipeline:
+                    current_image, branch_metadata = self._append_pipeline_steps(
+                        steps,
+                        stage_config.pipeline,
+                        {
+                            pipeline_id: PipelineInput(
+                                original_image=first_input.original_image,
+                                current_image=current_image,
+                                metadata=deepcopy(branch_metadata),
+                                camera_id=camera_id,
+                                frame_id=frame_id,
+                                frame_timestamp=frame_timestamp,
+                                source_pipeline_id=pipeline_id,
+                            )
+                        },
+                        camera_id,
+                        frame_id,
+                        frame_timestamp,
+                        active_pipeline_ids,
+                    )
                     continue
                 context = PipelineContext(
                     camera_id=camera_id,
@@ -172,20 +211,12 @@ class PipelineDebugSession:
                 if result.output_image is not None:
                     current_image = result.output_image
                 branch_metadata.update(deepcopy(result.metadata_updates))
-
-            for downstream_id in self.graph.downstream_ids(pipeline_id):
-                downstream_inputs = pending_inputs.setdefault(downstream_id, {})
-                downstream_inputs[pipeline_id] = PipelineInput(
-                    original_image=first_input.original_image,
-                    current_image=current_image,
-                    metadata=deepcopy(branch_metadata),
-                    camera_id=camera_id,
-                    frame_id=frame_id,
-                    frame_timestamp=frame_timestamp,
-                    source_pipeline_id=pipeline_id,
-                )
-
-        return steps
+        else:
+            first_input = next(iter(upstream_inputs.values()))
+            current_image = first_input.current_image
+            branch_metadata = deepcopy(first_input.metadata)
+        active_pipeline_ids.remove(pipeline_id)
+        return current_image, branch_metadata
 
     def _execute_step(
         self, pipeline_id: str, stage_config: Any, context: PipelineContext

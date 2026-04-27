@@ -8,7 +8,6 @@ from typing import Any, Dict, Iterator, List, Set
 from urllib.parse import urlparse
 from nvr_common.pipeline import (
     NamedPipeline,
-    PipelineEdge,
     PipelineGraph,
     PipelineStageConfig,
     PipelineValidationError,
@@ -43,11 +42,6 @@ class Config(Singleton, MutableMapping):
     KEY_PIPELINE_NAME: str = "name"
     KEY_PIPELINE_ENABLED: str = "enabled"
     KEY_PIPELINE_STAGES: str = "stages"
-    KEY_PIPELINE_INPUTS: str = "inputs"
-    KEY_PIPELINE_INPUTS_REQUIRED: str = "required"
-    KEY_PIPELINE_EDGES: str = "edges"
-    KEY_PIPELINE_EDGE_FROM: str = "from"
-    KEY_PIPELINE_EDGE_TO: str = "to"
     KEY_STAGE_ID: str = "id"
     KEY_STAGE_ENABLED: str = "enabled"
     KEY_STAGE_MODULE: str = "module"
@@ -230,9 +224,6 @@ class Config(Singleton, MutableMapping):
             self._normalize_pipelines_config(pipelines_config), yaml_path, allowed_root
         )
         merged_pipelines = list(config.get(self.KEY_PIPELINES, []))
-        merged_edges = list(config.get(self.KEY_PIPELINE_EDGES, []))
-        path_reference_targets: Dict[str, str] = {}
-
         for pipeline in list(merged_pipelines):
             if not isinstance(pipeline, dict):
                 continue
@@ -267,34 +258,10 @@ class Config(Singleton, MutableMapping):
 
                 child_pipeline_id = child_sources[0]
                 stage[self.KEY_STAGE_PIPELINE] = child_pipeline_id
-                path_reference_targets[pipeline_reference] = child_pipeline_id
                 for child_pipeline in expanded_child.get(self.KEY_PIPELINES, []):
                     merged_pipelines.append(child_pipeline)
-                for child_edge in expanded_child.get(self.KEY_PIPELINE_EDGES, []):
-                    merged_edges.append(child_edge)
-
-        for edge in merged_edges:
-            if not isinstance(edge, dict):
-                continue
-            target = edge.get(self.KEY_PIPELINE_EDGE_TO)
-            if isinstance(target, str) and target in path_reference_targets:
-                edge[self.KEY_PIPELINE_EDGE_TO] = path_reference_targets[target]
-            source = edge.get(self.KEY_PIPELINE_EDGE_FROM)
-            if isinstance(source, str) and source in path_reference_targets:
-                edge[self.KEY_PIPELINE_EDGE_FROM] = path_reference_targets[source]
 
         config[self.KEY_PIPELINES] = merged_pipelines
-        config[self.KEY_PIPELINE_EDGES] = [
-            edge
-            for edge in merged_edges
-            if not (
-                isinstance(edge, dict)
-                and (
-                    self._is_yaml_path(str(edge.get(self.KEY_PIPELINE_EDGE_FROM, "")))
-                    or self._is_yaml_path(str(edge.get(self.KEY_PIPELINE_EDGE_TO, "")))
-                )
-            )
-        ]
         return self._normalize_pipelines_config(config)
 
     def _config_path_under(
@@ -658,8 +625,6 @@ class Config(Singleton, MutableMapping):
         pipelines_config[cls.KEY_PIPELINES] = (
             raw_pipeline_list if isinstance(raw_pipeline_list, list) else []
         )
-        pipelines_config.setdefault(cls.KEY_PIPELINE_EDGES, [])
-
         for pipeline in pipelines_config[cls.KEY_PIPELINES]:
             if not isinstance(pipeline, dict):
                 continue
@@ -680,59 +645,7 @@ class Config(Singleton, MutableMapping):
                     stage[cls.KEY_STAGE_CLASS] = stage[cls.KEY_STAGE_CLASS_NAME]
                 stage.pop(cls.KEY_STAGE_CLASS_NAME, None)
 
-        generated_edges = cls._pipeline_reference_edges(pipelines_config)
-        explicit_edges = pipelines_config.get(cls.KEY_PIPELINE_EDGES)
-        if isinstance(explicit_edges, list):
-            edge_keys = {
-                (
-                    edge.get(cls.KEY_PIPELINE_EDGE_FROM),
-                    edge.get(cls.KEY_PIPELINE_EDGE_TO),
-                )
-                for edge in explicit_edges
-                if isinstance(edge, dict)
-            }
-            for edge in generated_edges:
-                edge_key = (
-                    edge[cls.KEY_PIPELINE_EDGE_FROM],
-                    edge[cls.KEY_PIPELINE_EDGE_TO],
-                )
-                if edge_key not in edge_keys:
-                    explicit_edges.append(edge)
-        else:
-            pipelines_config[cls.KEY_PIPELINE_EDGES] = generated_edges
-
         return pipelines_config
-
-    @classmethod
-    def _pipeline_reference_edges(
-        cls, pipelines_config: dict[str, Any]
-    ) -> list[dict[str, str]]:
-        edges: list[dict[str, str]] = []
-        raw_pipelines = pipelines_config.get(cls.KEY_PIPELINES)
-        if not isinstance(raw_pipelines, list):
-            return edges
-
-        for pipeline in raw_pipelines:
-            if not isinstance(pipeline, dict):
-                continue
-            source = pipeline.get(cls.KEY_PIPELINE_ID)
-            if not isinstance(source, str):
-                continue
-            stages = pipeline.get(cls.KEY_PIPELINE_STAGES)
-            if not isinstance(stages, list):
-                continue
-            for stage in stages:
-                if not isinstance(stage, dict):
-                    continue
-                target = stage.get(cls.KEY_STAGE_PIPELINE)
-                if isinstance(target, str) and target:
-                    edges.append(
-                        {
-                            cls.KEY_PIPELINE_EDGE_FROM: source,
-                            cls.KEY_PIPELINE_EDGE_TO: target,
-                        }
-                    )
-        return edges
 
     def _validate_dir_path(
         self, raw_value: Any, field_label: str, errors: List[str], validate_exists: True
@@ -1016,9 +929,6 @@ class Config(Singleton, MutableMapping):
         if self.KEY_PIPELINES not in raw_pipelines_config:
             errors.append(f"{field_label}->pipelines is required")
             return
-        if self.KEY_PIPELINE_EDGES not in raw_pipelines_config:
-            errors.append(f"{field_label}->edges is required")
-            return
 
         try:
             graph = self._parse_pipelines(raw_pipelines_config)
@@ -1032,27 +942,18 @@ class Config(Singleton, MutableMapping):
             errors.append(f"{field_label}: {ex}")
             return
 
-        self._validate_fan_in_requirements(graph, field_label, errors)
-
     @classmethod
     def _parse_pipelines(cls, raw_pipelines_config: dict[str, Any]) -> PipelineGraph:
         raw_pipelines_config = cls._normalize_pipelines_config(raw_pipelines_config)
         raw_pipelines = raw_pipelines_config.get(cls.KEY_PIPELINES)
-        raw_edges = raw_pipelines_config.get(cls.KEY_PIPELINE_EDGES)
         if not isinstance(raw_pipelines, list):
             raise ValueError("pipelines must be a list")
-        if not isinstance(raw_edges, list):
-            raise ValueError("edges must be a list")
 
         pipelines = tuple(
             cls._parse_named_pipeline(raw_pipeline, index)
             for index, raw_pipeline in enumerate(raw_pipelines)
         )
-        edges = tuple(
-            cls._parse_pipeline_edge(raw_edge, index)
-            for index, raw_edge in enumerate(raw_edges)
-        )
-        return PipelineGraph(pipelines=pipelines, edges=edges)
+        return PipelineGraph(pipelines=pipelines)
 
     @classmethod
     def _parse_named_pipeline(cls, raw_pipeline: Any, index: int) -> NamedPipeline:
@@ -1074,7 +975,6 @@ class Config(Singleton, MutableMapping):
         if not isinstance(raw_stages, list):
             raise ValueError(f"pipeline '{pipeline_id}' stages must be a list")
 
-        required_inputs = cls._parse_required_inputs(raw_pipeline, pipeline_id)
         stages = tuple(
             cls._parse_stage(stage, stage_index, pipeline_id)
             for stage_index, stage in enumerate(raw_stages)
@@ -1084,29 +984,7 @@ class Config(Singleton, MutableMapping):
             name=pipeline_name,
             stages=stages,
             enabled=enabled,
-            required_inputs=required_inputs,
         )
-
-    @classmethod
-    def _parse_required_inputs(
-        cls, raw_pipeline: dict[str, Any], pipeline_id: str
-    ) -> tuple[str, ...]:
-        raw_inputs = raw_pipeline.get(cls.KEY_PIPELINE_INPUTS)
-        if raw_inputs is None:
-            return ()
-        if not isinstance(raw_inputs, dict):
-            raise ValueError(f"pipeline '{pipeline_id}' inputs must be a mapping")
-
-        raw_required = raw_inputs.get(cls.KEY_PIPELINE_INPUTS_REQUIRED)
-        if raw_required is None:
-            return ()
-        if not isinstance(raw_required, list) or not all(
-            isinstance(input_id, str) and input_id for input_id in raw_required
-        ):
-            raise ValueError(
-                f"pipeline '{pipeline_id}' inputs.required must be a list of strings"
-            )
-        return tuple(raw_required)
 
     @classmethod
     def _parse_stage(
@@ -1163,19 +1041,6 @@ class Config(Singleton, MutableMapping):
         )
 
     @classmethod
-    def _parse_pipeline_edge(cls, raw_edge: Any, index: int) -> PipelineEdge:
-        if not isinstance(raw_edge, dict):
-            raise ValueError(f"edge at index {index} must be a mapping")
-
-        source = cls._required_non_empty_string(
-            raw_edge, cls.KEY_PIPELINE_EDGE_FROM, f"edge at index {index}"
-        )
-        target = cls._required_non_empty_string(
-            raw_edge, cls.KEY_PIPELINE_EDGE_TO, f"edge at index {index}"
-        )
-        return PipelineEdge(source=source, target=target)
-
-    @classmethod
     def _required_non_empty_string(
         cls, raw_value: dict[str, Any], key: str, field_label: str
     ) -> str:
@@ -1192,24 +1057,3 @@ class Config(Singleton, MutableMapping):
         if not isinstance(value, bool):
             raise ValueError(f"{field_label} must have '{key}' true/false")
         return value
-
-    def _validate_fan_in_requirements(
-        self, graph: PipelineGraph, field_label: str, errors: List[str]
-    ) -> None:
-        for pipeline in graph.pipelines:
-            upstream_ids = graph.upstream_ids(pipeline.id)
-            if len(upstream_ids) < 2:
-                continue
-
-            if not pipeline.required_inputs:
-                errors.append(
-                    f"{field_label}->pipeline '{pipeline.id}' must define "
-                    "inputs.required for fan-in"
-                )
-                continue
-
-            if set(pipeline.required_inputs) != set(upstream_ids):
-                errors.append(
-                    f"{field_label}->pipeline '{pipeline.id}' inputs.required "
-                    "must match upstream edges"
-                )

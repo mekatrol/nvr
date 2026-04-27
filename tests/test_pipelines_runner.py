@@ -2,7 +2,6 @@ import unittest
 
 from nvr_common.pipeline import (
     NamedPipeline,
-    PipelineEdge,
     PipelineGraph,
     PipelineGraphRunner,
     PipelineStageConfig,
@@ -43,7 +42,7 @@ class PipelineGraphRunnerTest(unittest.TestCase):
         self.assertEqual("image", output.metadata["enabled"])
         self.assertNotIn("disabled", output.metadata)
 
-    def test_fans_out_with_isolated_branch_metadata(self):
+    def test_runs_multiple_pipelines_independently_in_config_order(self):
         graph = PipelineGraph(
             pipelines=(
                 NamedPipeline(
@@ -80,10 +79,6 @@ class PipelineGraphRunnerTest(unittest.TestCase):
                     ),
                 ),
             ),
-            edges=(
-                PipelineEdge(source="preprocessing", target="object_detection"),
-                PipelineEdge(source="preprocessing", target="thumbnail"),
-            ),
         )
 
         outputs = PipelineGraphRunner(graph).run(
@@ -95,10 +90,10 @@ class PipelineGraphRunnerTest(unittest.TestCase):
 
         self.assertEqual("detect", outputs["object_detection"].metadata["branch"])
         self.assertEqual("thumb", outputs["thumbnail"].metadata["branch"])
-        self.assertEqual("done", outputs["object_detection"].metadata["pre"])
-        self.assertEqual("done", outputs["thumbnail"].metadata["pre"])
+        self.assertNotIn("pre", outputs["object_detection"].metadata)
+        self.assertNotIn("pre", outputs["thumbnail"].metadata)
 
-    def test_fan_in_receives_required_upstream_inputs(self):
+    def test_pipeline_reference_runs_inline_as_ordered_stage(self):
         graph = PipelineGraph(
             pipelines=(
                 NamedPipeline(
@@ -113,58 +108,45 @@ class PipelineGraphRunnerTest(unittest.TestCase):
                     ),
                 ),
                 NamedPipeline(
-                    id="object_detection",
+                    id="child",
                     stages=(
                         PipelineStageConfig(
-                            id="detect",
+                            id="child-stage",
                             module="tests.pipeline.append_stage",
                             class_name="AppendStage",
-                            config={"suffix": "-detect"},
+                            config={"suffix": "-child"},
                         ),
                     ),
                 ),
                 NamedPipeline(
-                    id="thumbnail",
+                    id="parent",
                     stages=(
                         PipelineStageConfig(
-                            id="thumb",
+                            id="start",
                             module="tests.pipeline.append_stage",
                             class_name="AppendStage",
-                            config={"suffix": "-thumb"},
+                            config={"suffix": "-start"},
                         ),
-                    ),
-                ),
-                NamedPipeline(
-                    id="post_processing",
-                    required_inputs=("object_detection", "thumbnail"),
-                    stages=(
                         PipelineStageConfig(
-                            id="combine",
-                            module="tests.pipeline.context_capture_stage",
-                            class_name="ContextCaptureStage",
-                            config={"value": "configured"},
+                            id="child",
+                            pipeline="child",
+                        ),
+                        PipelineStageConfig(
+                            id="end",
+                            module="tests.pipeline.append_stage",
+                            class_name="AppendStage",
+                            config={"suffix": "-end"},
                         ),
                     ),
                 ),
-            ),
-            edges=(
-                PipelineEdge(source="preprocessing", target="object_detection"),
-                PipelineEdge(source="preprocessing", target="thumbnail"),
-                PipelineEdge(source="object_detection", target="post_processing"),
-                PipelineEdge(source="thumbnail", target="post_processing"),
-            ),
+            )
         )
 
         outputs = PipelineGraphRunner(graph).run(
             camera_id="driveway", frame_id="frame-1", image="original"
         )
 
-        metadata = outputs["post_processing"].metadata
-        self.assertEqual("original", metadata["original"])
-        self.assertEqual(("object_detection", "thumbnail"), metadata["upstream_ids"])
-        self.assertEqual("configured", metadata["config_value"])
-        self.assertNotIn("detect", metadata)
-        self.assertNotIn("thumb", metadata)
+        self.assertEqual("original-start-child-end", outputs["parent"].output_image)
 
 
 if __name__ == "__main__":

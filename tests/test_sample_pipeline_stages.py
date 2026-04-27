@@ -4,7 +4,6 @@ import numpy as np
 
 from nvr_common.pipeline import (
     NamedPipeline,
-    PipelineEdge,
     PipelineGraph,
     PipelineGraphRunner,
     PipelineStageConfig,
@@ -68,7 +67,7 @@ class SamplePipelineStagesTest(unittest.TestCase):
         self.assertEqual((3, 5, 3), output.output_image.shape)
         self.assertEqual({"width": 5, "height": 3}, output.metadata["resize"])
 
-    def test_sample_graph_fans_out_fans_in_and_skips_disabled_stage(self):
+    def test_sample_graph_runs_ordered_pipelines_and_skips_disabled_stage(self):
         image = self._image(width=10, height=8)
         graph = PipelineGraph(
             pipelines=(
@@ -116,9 +115,11 @@ class SamplePipelineStagesTest(unittest.TestCase):
                     ),
                 ),
                 NamedPipeline(
-                    id="post_processing",
-                    required_inputs=("object_detection", "thumbnail"),
+                    id="ordered",
                     stages=(
+                        PipelineStageConfig(id="preprocessing", pipeline="preprocessing"),
+                        PipelineStageConfig(id="object-detection", pipeline="object_detection"),
+                        PipelineStageConfig(id="thumbnail", pipeline="thumbnail"),
                         PipelineStageConfig(
                             id="combine-metadata",
                             module=(
@@ -131,29 +132,16 @@ class SamplePipelineStagesTest(unittest.TestCase):
                     ),
                 ),
             ),
-            edges=(
-                PipelineEdge(source="preprocessing", target="object_detection"),
-                PipelineEdge(source="preprocessing", target="thumbnail"),
-                PipelineEdge(source="object_detection", target="post_processing"),
-                PipelineEdge(source="thumbnail", target="post_processing"),
-            ),
         )
 
         outputs = PipelineGraphRunner(graph).run(
             camera_id="driveway", frame_id="frame-1", image=image
         )
 
-        self.assertEqual((4, 6, 3), outputs["preprocessing"].output_image.shape)
-        self.assertNotEqual((1, 1, 3), outputs["preprocessing"].output_image.shape)
-        self.assertEqual((4, 6, 3), outputs["object_detection"].output_image.shape)
-        self.assertEqual((2, 3, 3), outputs["thumbnail"].output_image.shape)
+        self.assertEqual((2, 3, 3), outputs["ordered"].output_image.shape)
 
-        self.assertEqual("person", outputs["object_detection"].metadata["detected"])
-        self.assertTrue(outputs["post_processing"].metadata["combined"])
-        self.assertEqual(
-            ("object_detection", "thumbnail"),
-            outputs["post_processing"].metadata["combine-metadata.upstream_ids"],
-        )
+        self.assertEqual("person", outputs["ordered"].metadata["detected"])
+        self.assertTrue(outputs["ordered"].metadata["combined"])
 
     @staticmethod
     def _image(width, height):

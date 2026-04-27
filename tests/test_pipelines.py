@@ -2,7 +2,6 @@ import unittest
 
 from nvr_common.pipeline import (
     NamedPipeline,
-    PipelineEdge,
     PipelineGraph,
     PipelineStageConfig,
     PipelineValidationError,
@@ -21,27 +20,6 @@ class PipelineGraphTest(unittest.TestCase):
         with self.assertRaisesRegex(
             PipelineValidationError, "duplicate pipeline id: preprocessing"
         ):
-            graph.validate()
-
-    def test_rejects_unknown_edge_reference(self):
-        graph = PipelineGraph(
-            pipelines=(NamedPipeline(id="preprocessing"),),
-            edges=(PipelineEdge(source="preprocessing", target="missing"),),
-        )
-
-        with self.assertRaisesRegex(PipelineValidationError, "unknown edge target"):
-            graph.validate()
-
-    def test_rejects_cycles(self):
-        graph = PipelineGraph(
-            pipelines=(NamedPipeline(id="a"), NamedPipeline(id="b")),
-            edges=(
-                PipelineEdge(source="a", target="b"),
-                PipelineEdge(source="b", target="a"),
-            ),
-        )
-
-        with self.assertRaisesRegex(PipelineValidationError, "cycle detected"):
             graph.validate()
 
     def test_rejects_duplicate_stage_ids(self):

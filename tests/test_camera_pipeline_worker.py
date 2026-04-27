@@ -47,7 +47,6 @@ class CameraPipelineWorkerTest(unittest.TestCase):
                             ],
                         }
                     ],
-                    "edges": [],
                 },
             )
             set_config_env(config_path)
@@ -90,7 +89,6 @@ class CameraPipelineWorkerTest(unittest.TestCase):
                             ],
                         }
                     ],
-                    "edges": [],
                 },
             )
             set_config_env(config_path)

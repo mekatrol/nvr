@@ -179,7 +179,6 @@ class DebugApiTest(unittest.TestCase):
                         "pipelines": [
                             {"id": "pipelines-only", "enabled": True, "stages": []}
                         ],
-                        "edges": [],
                     }
                 ).encode("utf-8"),
             )
@@ -244,7 +243,6 @@ class DebugApiTest(unittest.TestCase):
                                 ],
                             }
                         ],
-                        "edges": [],
                     }
                 ).encode("utf-8"),
             )
@@ -312,7 +310,6 @@ class DebugApiTest(unittest.TestCase):
                                     ],
                                 }
                             ],
-                            "edges": [],
                         }
                     ).encode("utf-8"),
                 )
@@ -381,7 +378,6 @@ class DebugApiTest(unittest.TestCase):
                             ],
                         }
                     ],
-                    "edges": [],
                 },
             )
             store._write_yaml(
@@ -403,7 +399,6 @@ class DebugApiTest(unittest.TestCase):
                             ],
                         }
                     ],
-                    "edges": [],
                 },
             )
 
@@ -577,7 +572,6 @@ class DebugApiTest(unittest.TestCase):
                         ],
                     }
                 ],
-                "edges": [],
             },
             pipeline_config_storage_path="pipeline_config",
         )
