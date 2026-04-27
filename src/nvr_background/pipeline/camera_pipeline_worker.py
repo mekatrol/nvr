@@ -6,7 +6,9 @@ from typing import Any
 
 from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
 from nvr_common.config import Config
+from nvr_common.logging.rtsp_sanitizing_filter import sanitize_rtsp_url
 from nvr_common.pipeline import PipelineGraphRunner
+from nvr_common.pipeline.frame_validation import bad_frame_reason
 
 
 class CameraPipelineWorker(threading.Thread):
@@ -41,7 +43,17 @@ class CameraPipelineWorker(threading.Thread):
         if self.runner is None:
             return {}
 
-        frame = self.frame_source.read()
+        try:
+            frame = self.frame_source.read()
+        except Exception as ex:
+            self._log_bad_frame(sanitize_rtsp_url(str(ex)))
+            return {}
+
+        reason = bad_frame_reason(frame)
+        if reason is not None:
+            self._log_bad_frame(reason)
+            return {}
+
         frame_timestamp = datetime.now(timezone.utc)
         outputs = self.runner.run(
             camera_id=self.camera_id,
@@ -51,6 +63,12 @@ class CameraPipelineWorker(threading.Thread):
         )
         self.last_outputs = outputs
         return outputs
+
+    def _log_bad_frame(self, reason: str) -> None:
+        if self.logger:
+            self.logger.warning(
+                "[%s] Dropping bad pipeline frame: %s", self.camera_id, reason
+            )
 
     def run(self) -> None:
         if self.runner is None:

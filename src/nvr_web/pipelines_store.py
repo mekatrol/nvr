@@ -14,6 +14,7 @@ from nvr_common.pipeline import PipelineGraph
 
 class PipelinesStore:
     EXAMPLE_RESIZE_STAGE_FILENAME = "example_resize_stage.py"
+    DEFAULT_FRAME_INTERVAL_SECONDS = 0.5
 
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -31,6 +32,14 @@ class PipelinesStore:
         pipelines_config = self.load_draft_pipelines()
         return self.pipelines_response(pipelines_config)
 
+    def draft_graph(self) -> PipelineGraph | None:
+        pipelines_config = self.load_draft_pipelines()
+        if pipelines_config.get(Config.KEY_PIPELINES_ENABLED) is False:
+            return None
+        graph = Config._parse_pipelines(pipelines_config)
+        graph.validate()
+        return graph
+
     def deployed_response(self) -> dict[str, Any]:
         pipelines_config = self.config.get_pipelines_config()
         if not pipelines_config:
@@ -44,7 +53,9 @@ class PipelinesStore:
         else:
             pipelines_config = self.config.get_pipelines_config() or {
                 Config.KEY_PIPELINES_ENABLED: True,
-                Config.KEY_PIPELINE_FRAME_INTERVAL_SECONDS: 1.0,
+                Config.KEY_PIPELINE_FRAME_INTERVAL_SECONDS: (
+                    self.DEFAULT_FRAME_INTERVAL_SECONDS
+                ),
                 Config.KEY_PIPELINES: [],
                 Config.KEY_PIPELINE_EDGES: [],
             }
@@ -71,6 +82,9 @@ class PipelinesStore:
 
         pipelines_config = self.load_draft_pipelines()
         pipelines_config[Config.KEY_PIPELINES_ENABLED] = True
+        pipelines_config[Config.KEY_PIPELINE_FRAME_INTERVAL_SECONDS] = (
+            self.DEFAULT_FRAME_INTERVAL_SECONDS
+        )
         pipelines = pipelines_config.setdefault(Config.KEY_PIPELINES, [])
         pipelines[:] = [
             pipeline

@@ -1,5 +1,5 @@
 pipelines:
   enabled: false
-  frame_interval_seconds: 1.0
+  frame_interval_seconds: 0.5
   pipeline: []
   edges: []

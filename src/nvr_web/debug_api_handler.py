@@ -80,7 +80,7 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
             body = self._read_json()
             session = api_state.session(body.get("camera_id", ""))
             if session is None:
-                self._json({"error": "pipelines disabled"}, status=404)
+                self._json({"error": self._no_deployed_pipeline_error()}, status=404)
                 return
             pipeline_id = body.get("pipeline_id")
             stage_id = body.get("stage_id")
@@ -98,7 +98,7 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
             body = self._read_json()
             session = api_state.session(body.get("camera_id", ""))
             if session is None:
-                self._json({"error": "pipelines disabled"}, status=404)
+                self._json({"error": self._no_deployed_pipeline_error()}, status=404)
                 return
             command = body.get("command")
             if command == "run":
@@ -108,7 +108,7 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                     self._json({"error": str(ex)}, status=502)
                     return
                 if session is None:
-                    self._json({"error": "pipelines disabled"}, status=404)
+                    self._json({"error": self._no_deployed_pipeline_error()}, status=404)
                     return
                 session.run()
             elif command == "pause":
@@ -167,3 +167,7 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
     def _query_value(query: dict[str, list[str]], key: str) -> str | None:
         values = query.get(key)
         return values[0] if values else None
+
+    @staticmethod
+    def _no_deployed_pipeline_error() -> str:
+        return "No draft pipeline is available. Generate or save a draft before running it."

@@ -6,17 +6,23 @@ from typing import Any
 from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
 from nvr_common.config import Config
 from nvr_common.logging.rtsp_sanitizing_filter import sanitize_rtsp_url
+from nvr_common.pipeline.frame_validation import bad_frame_reason
 from nvr_common.pipeline.debug import PipelineDebugSession
 from nvr_web.pipelines_store import PipelinesStore
 
 
 class DebugApiState:
     def __init__(
-        self, config: Config | None = None, frame_source_factory: Any = None
+        self,
+        config: Config | None = None,
+        frame_source_factory: Any = None,
+        logger: Any = None,
     ) -> None:
         self.config = config or Config()
         self.frame_source_factory = frame_source_factory or OpenCvFrameSource
+        self.logger = logger
         self.sessions: dict[str, PipelineDebugSession] = {}
+        self.frame_sources: dict[str, Any] = {}
         self.pipelines_store = PipelinesStore(self.config)
 
     def list_cameras(self) -> list[dict[str, Any]]:
@@ -28,16 +34,14 @@ class DebugApiState:
                         "id": camera.get(Config.KEY_CAMERA_ID),
                         "name": camera.get(Config.KEY_CAMERA_NAME),
                         "enabled": camera.get(Config.KEY_CAMERA_ENABLED, False),
-                        "pipeline_enabled": self.config.get_pipelines(
-                            camera.get(Config.KEY_CAMERA_ID, "")
-                        )
+                        "pipeline_enabled": self.pipelines_store.draft_graph()
                         is not None,
                     }
                 )
         return cameras
 
     def pipelines(self, camera_id: str | None = None) -> dict[str, Any]:
-        graph = self.config.get_pipelines(camera_id)
+        graph = self.pipelines_store.draft_graph()
         if graph is None:
             return {"enabled": False, "pipelines": [], "edges": []}
         return {
@@ -66,7 +70,7 @@ class DebugApiState:
     def session(self, camera_id: str) -> PipelineDebugSession | None:
         if camera_id in self.sessions:
             return self.sessions[camera_id]
-        graph = self.config.get_pipelines(camera_id)
+        graph = self.pipelines_store.draft_graph()
         if graph is None:
             return None
         session = PipelineDebugSession(graph)
@@ -77,7 +81,9 @@ class DebugApiState:
         return self.pipelines_store.draft_response()
 
     def save_draft_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
-        return self.pipelines_store.save_draft_pipelines(raw_pipelines)
+        response = self.pipelines_store.save_draft_pipelines(raw_pipelines)
+        self.sessions.clear()
+        return response
 
     def deploy_draft_pipelines(self) -> dict[str, Any]:
         response = self.pipelines_store.deploy_draft_pipelines()
@@ -85,29 +91,36 @@ class DebugApiState:
         return response
 
     def generate_example_resize_pipeline(self) -> dict[str, Any]:
-        return self.pipelines_store.generate_example_resize_pipeline()
+        response = self.pipelines_store.generate_example_resize_pipeline()
+        self.sessions.clear()
+        return response
 
     def reload_config(self) -> None:
         self.config = Config()
         self.pipelines_store = PipelinesStore(self.config)
         self.sessions.clear()
+        self.close_frame_sources()
 
     def load_camera_frame(self, camera_id: str) -> PipelineDebugSession | None:
         session = self.session(camera_id)
         if session is None:
             return None
 
-        camera_config = self.config.get_camera(camera_id)
-        frame_source = self.frame_source_factory(
-            camera_config[Config.KEY_CAMERA_RTSP_URL]
-        )
+        frame_source = self.frame_source(camera_id)
         try:
             frame = frame_source.read()
         except Exception as ex:
+            self.close_frame_source(camera_id)
             message = sanitize_rtsp_url(str(ex))
-            raise RuntimeError(message) from ex
-        finally:
-            self._close_frame_source(frame_source)
+            self._log_bad_frame(camera_id, message)
+            session.drop_frame()
+            return session
+
+        reason = bad_frame_reason(frame)
+        if reason is not None:
+            self._log_bad_frame(camera_id, reason)
+            session.drop_frame()
+            return session
 
         frame_timestamp = datetime.now(timezone.utc)
         session.load_frame(
@@ -118,8 +131,33 @@ class DebugApiState:
         )
         return session
 
-    @staticmethod
-    def _close_frame_source(frame_source: Any) -> None:
+    def frame_source(self, camera_id: str) -> Any:
+        frame_source = self.frame_sources.get(camera_id)
+        if frame_source is not None:
+            return frame_source
+
+        camera_config = self.config.get_camera(camera_id)
+        frame_source = self.frame_source_factory(
+            camera_config[Config.KEY_CAMERA_RTSP_URL]
+        )
+        self.frame_sources[camera_id] = frame_source
+        return frame_source
+
+    def close_frame_sources(self) -> None:
+        for frame_source in self.frame_sources.values():
+            close = getattr(frame_source, "close", None)
+            if callable(close):
+                close()
+        self.frame_sources.clear()
+
+    def close_frame_source(self, camera_id: str) -> None:
+        frame_source = self.frame_sources.pop(camera_id, None)
+        if frame_source is None:
+            return
         close = getattr(frame_source, "close", None)
         if callable(close):
             close()
+
+    def _log_bad_frame(self, camera_id: str, reason: str) -> None:
+        if self.logger is not None:
+            self.logger.warning("[%s] Dropping bad pipeline frame: %s", camera_id, reason)

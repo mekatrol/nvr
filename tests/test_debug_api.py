@@ -1,11 +1,14 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import yaml
 
+from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
 from nvr_common.config import Config
 from nvr_web.debug_api_state import DebugApiState
 from tests.config_test_helpers import (
@@ -59,6 +62,97 @@ class DebugApiTest(unittest.TestCase):
                 )
             )
             self.assertEqual([8, 10, 3], state["records"][0]["input_shape"])
+
+    def test_debug_session_reuses_open_frame_source_between_runs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            CountingFrameSource.instances = []
+            config = self._config(Path(temp_dir))
+            state = DebugApiState(config, CountingFrameSource)
+
+            state.load_camera_frame("driveway")
+            state.load_camera_frame("driveway")
+
+            self.assertEqual(1, len(CountingFrameSource.instances))
+            self.assertEqual(2, CountingFrameSource.instances[0].reads)
+
+    def test_debug_session_drops_bad_frame_without_running_pipeline(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            logger = FakeLogger()
+            config = self._config(Path(temp_dir))
+            TestableDebugApiHandler.api_state = DebugApiState(
+                config, GreenFrameSource, logger=logger
+            )
+
+            run_handler = TestableDebugApiHandler(
+                "/api/debug/command",
+                method="POST",
+                body=json.dumps(
+                    {"camera_id": "driveway", "command": "run"}
+                ).encode("utf-8"),
+            )
+            run_handler.do_POST()
+            debug_state = json.loads(run_handler.wfile.getvalue().decode("utf-8"))
+
+            self.assertEqual(200, run_handler.status)
+            self.assertEqual("completed", debug_state["status"])
+            self.assertEqual([], debug_state["records"])
+            self.assertIn("Dropping bad pipeline frame", logger.warnings[0])
+
+    def test_opencv_frame_source_defaults_rtsp_to_tcp_transport(self):
+        original_options = os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
+        try:
+            frame_source = OpenCvFrameSource("rtsp://camera/stream")
+            frame_source._configure_rtsp_transport()
+
+            self.assertEqual(
+                "rtsp_transport;tcp",
+                os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"),
+            )
+        finally:
+            if original_options is None:
+                os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
+            else:
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = original_options
+
+    def test_opencv_frame_source_reopens_once_after_failed_read(self):
+        captures = [
+            FakeCvCapture([(False, None)]),
+            FakeCvCapture(
+                [(True, np.full((2, 3, 3), 255, dtype=np.uint8)), (False, None)]
+            ),
+        ]
+
+        with patch(
+            "nvr_background.pipeline.opencv_frame_source.cv2.VideoCapture",
+            side_effect=captures,
+        ):
+            frame_source = OpenCvFrameSource("rtsp://camera/stream")
+            frame = frame_source.read()
+
+        self.assertEqual((2, 3, 3), frame.shape)
+        self.assertTrue(captures[0].released)
+        self.assertTrue(captures[1].opened)
+
+    def test_opencv_frame_source_discards_startup_frames_and_returns_latest(self):
+        frames = [
+            (True, np.full((2, 3, 3), 10, dtype=np.uint8)),
+            (True, np.full((2, 3, 3), 20, dtype=np.uint8)),
+            (True, np.full((2, 3, 3), 30, dtype=np.uint8)),
+            (False, None),
+        ]
+        capture = FakeCvCapture(frames)
+
+        with patch(
+            "nvr_background.pipeline.opencv_frame_source.cv2.VideoCapture",
+            return_value=capture,
+        ):
+            frame_source = OpenCvFrameSource(
+                "rtsp://camera/stream", warmup_frames=4, read_drain_frames=3
+            )
+            frame = frame_source.read()
+
+        self.assertEqual(4, capture.grabs)
+        self.assertEqual(30, int(frame[0, 0, 0]))
 
     def test_config_creates_pipeline_storage_directory_on_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -210,6 +304,7 @@ class DebugApiTest(unittest.TestCase):
             )
 
             self.assertEqual(200, handler.status)
+            self.assertEqual(0.5, response["frame_interval_seconds"])
             self.assertTrue(stage_path.is_file())
             self.assertFalse(deployed_path.exists())
             self.assertFalse(deployed_stage_path.exists())
@@ -227,6 +322,25 @@ class DebugApiTest(unittest.TestCase):
             self.assertEqual(
                 {"output_width": 640, "output_height": 360},
                 draft_pipeline["stages"][0]["config"],
+            )
+
+            run_handler = TestableDebugApiHandler(
+                "/api/debug/command",
+                method="POST",
+                body=json.dumps(
+                    {"camera_id": "driveway", "command": "run"}
+                ).encode("utf-8"),
+            )
+            run_handler.do_POST()
+            debug_state = json.loads(run_handler.wfile.getvalue().decode("utf-8"))
+
+            self.assertEqual(200, run_handler.status)
+            self.assertTrue(
+                any(
+                    record["pipeline_id"] == "example-resize"
+                    and record["stage_id"] == "resize-frame"
+                    for record in debug_state["records"]
+                )
             )
 
     def _config(self, temp_path):
@@ -272,6 +386,77 @@ class FakeFrameSource:
 
     def close(self):
         self.closed = True
+
+
+class CountingFrameSource:
+    instances = []
+
+    def __init__(self, source):
+        self.source = source
+        self.reads = 0
+        self.closed = False
+        self.instances.append(self)
+
+    def read(self):
+        self.reads += 1
+        return np.full((8, 10, 3), self.reads, dtype=np.uint8)
+
+    def close(self):
+        self.closed = True
+
+
+class GreenFrameSource:
+    def __init__(self, source):
+        self.source = source
+
+    def read(self):
+        frame = np.zeros((80, 100, 3), dtype=np.uint8)
+        frame[:, :30] = [70, 70, 70]
+        frame[:, 30:55] = [245, 245, 245]
+        frame[:, 55:] = [0, 120, 0]
+        return frame
+
+    def close(self):
+        return None
+
+
+class FakeLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, message, *args):
+        self.warnings.append(message % args)
+
+
+class FakeCvCapture:
+    def __init__(self, reads):
+        self.reads = list(reads)
+        self.opened = False
+        self.released = False
+        self.grabs = 0
+
+    def set(self, *_args):
+        return True
+
+    def open(self, _source):
+        self.opened = True
+        return True
+
+    def isOpened(self):
+        return self.opened
+
+    def read(self):
+        if not self.reads:
+            return False, None
+        return self.reads.pop(0)
+
+    def grab(self):
+        self.grabs += 1
+        return True
+
+    def release(self):
+        self.released = True
+        self.opened = False
 
 
 if __name__ == "__main__":

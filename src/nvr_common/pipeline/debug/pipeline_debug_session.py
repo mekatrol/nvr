@@ -48,6 +48,12 @@ class PipelineDebugSession:
         )
         self.status = "paused" if self._steps else "completed"
 
+    def drop_frame(self) -> None:
+        self.records.clear()
+        self._cursor = 0
+        self._steps = []
+        self.status = "completed"
+
     def add_breakpoint(self, pipeline_id: str, stage_id: str | None = None) -> None:
         self.breakpoints.add((pipeline_id, stage_id))
 

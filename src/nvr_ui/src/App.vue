@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 type Camera = {
@@ -68,6 +68,7 @@ const iconPaths = {
 } as const
 
 const cameras = ref<Camera[]>([])
+const defaultPipelineFrameIntervalSeconds = 0.5
 const selectedCameraId = ref('')
 const pipelines = ref<Pipeline[]>([])
 const edges = ref<Edge[]>([])
@@ -77,7 +78,7 @@ const selectedBreakpoint = ref('')
 const apiError = ref('')
 const isLoadingCameras = ref(false)
 const draftEnabled = ref(true)
-const draftFrameIntervalSeconds = ref('1.0')
+const draftFrameIntervalSeconds = ref(String(defaultPipelineFrameIntervalSeconds))
 const draftPipelines = ref<Pipeline[]>([])
 const draftEdges = ref<Edge[]>([])
 const currentView = ref<'index' | 'debug'>('index')
@@ -96,6 +97,9 @@ const selectedPipelineRequiredInputs = ref('')
 const deployStatus = ref('')
 const route = useRoute()
 const vscodeLoadFailed = ref(false)
+const runLoopTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const isRunLoopActive = ref(false)
+const isRunLoopTicking = ref(false)
 const vscodeWebUrl = computed(
   () =>
     import.meta.env.VITE_VSCODE_WEB_URL ||
@@ -148,7 +152,9 @@ async function loadPipelines() {
 async function loadDraftPipelines() {
   const graph = await getJson<PipelinesResponse>('/api/pipelines/draft')
   draftEnabled.value = graph.enabled
-  draftFrameIntervalSeconds.value = String(graph.frame_interval_seconds ?? '1.0')
+  draftFrameIntervalSeconds.value = String(
+    graph.frame_interval_seconds ?? defaultPipelineFrameIntervalSeconds,
+  )
   draftPipelines.value = graph.pipelines
   draftEdges.value = graph.edges
   if (!selectedPipelineId.value && draftPipelines.value[0]) {
@@ -178,6 +184,49 @@ async function runCommand(command: string) {
   await loadDebugState()
 }
 
+async function startRunLoop() {
+  if (isRunLoopActive.value) return
+  isRunLoopActive.value = true
+  try {
+    await runLoopTick()
+  } catch {
+    stopRunLoop(false)
+    return
+  }
+  if (!isRunLoopActive.value) return
+  runLoopTimer.value = setInterval(() => {
+    runLoopTick().catch(() => stopRunLoop(false))
+  }, defaultPipelineFrameIntervalSeconds * 1000)
+}
+
+async function runLoopTick() {
+  if (isRunLoopTicking.value) return
+  if (!selectedCameraId.value) {
+    stopRunLoop(false)
+    return
+  }
+  isRunLoopTicking.value = true
+  try {
+    await runCommand('run')
+    if (debugState.value.status === 'paused') {
+      stopRunLoop(false)
+    }
+  } finally {
+    isRunLoopTicking.value = false
+  }
+}
+
+async function stopRunLoop(sendPause = true) {
+  isRunLoopActive.value = false
+  if (runLoopTimer.value) {
+    clearInterval(runLoopTimer.value)
+    runLoopTimer.value = null
+  }
+  if (sendPause && selectedCameraId.value) {
+    await runCommand('pause').catch(() => undefined)
+  }
+}
+
 async function toggleBreakpoint(enabled: boolean) {
   if (!selectedCameraId.value || !selectedBreakpoint.value) return
   const [pipelineId, stageId] = selectedBreakpoint.value.split(':')
@@ -190,6 +239,7 @@ async function toggleBreakpoint(enabled: boolean) {
 }
 
 async function refreshCamera() {
+  await stopRunLoop(false)
   try {
     showPipelineIndex()
     await loadPipelines()
@@ -226,11 +276,20 @@ async function deployDraftPipelines() {
 async function generateExampleResizePipeline() {
   const generated = await postJson<PipelinesResponse>('/api/pipelines/examples/resize', {})
   draftEnabled.value = generated.enabled
-  draftFrameIntervalSeconds.value = String(generated.frame_interval_seconds ?? '1.0')
+  draftFrameIntervalSeconds.value = String(
+    generated.frame_interval_seconds ?? defaultPipelineFrameIntervalSeconds,
+  )
   draftPipelines.value = generated.pipelines
   draftEdges.value = generated.edges
   selectPipeline('example-resize')
-  deployStatus.value = 'Example resize pipeline generated as draft'
+  deployStatus.value = 'Example resize pipeline generated as draft. Use Debugger to run it, or Deploy Draft when ready.'
+}
+
+async function deployDraftFromEditor() {
+  const deployed = await postJson<PipelinesResponse>('/api/pipelines/draft/deploy', {})
+  pipelines.value = deployed.pipelines
+  edges.value = deployed.edges
+  deployStatus.value = 'Draft deployed and server config reloaded'
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -243,7 +302,7 @@ async function getJson<T>(path: string): Promise<T> {
     throw error
   }
   if (!response.ok) {
-    apiError.value = `${response.status} ${response.statusText}`
+    apiError.value = await responseErrorMessage(response)
     throw new Error(apiError.value)
   }
   return response.json() as Promise<T>
@@ -263,10 +322,22 @@ async function postJson<T>(path: string, body: Record<string, unknown>): Promise
     throw error
   }
   if (!response.ok) {
-    apiError.value = `${response.status} ${response.statusText}`
+    apiError.value = await responseErrorMessage(response)
     throw new Error(apiError.value)
   }
   return response.json() as Promise<T>
+}
+
+async function responseErrorMessage(response: Response) {
+  try {
+    const payload = (await response.clone().json()) as { error?: unknown }
+    if (typeof payload.error === 'string' && payload.error.length > 0) {
+      return payload.error
+    }
+  } catch {
+    return `${response.status} ${response.statusText}`
+  }
+  return `${response.status} ${response.statusText}`
 }
 
 function formatJson(value: unknown) {
@@ -537,6 +608,10 @@ onMounted(() => {
     .then(refreshCamera)
     .catch(() => undefined)
 })
+
+onBeforeUnmount(() => {
+  stopRunLoop(false)
+})
 </script>
 
 <template>
@@ -548,6 +623,7 @@ onMounted(() => {
       </div>
       <nav>
         <button @click="generateExampleResizePipeline">Example Resize</button>
+        <button @click="deployDraftFromEditor">Deploy Draft</button>
         <RouterLink to="/">Debugger</RouterLink>
         <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
       </nav>
@@ -655,8 +731,8 @@ onMounted(() => {
       </section>
 
       <div class="controls">
-        <button @click="runCommand('run')">Run</button>
-        <button @click="runCommand('pause')">Pause</button>
+        <button @click="startRunLoop">{{ isRunLoopActive ? 'Running' : 'Run' }}</button>
+        <button @click="stopRunLoop()">Stop</button>
         <button @click="runCommand('step')">Step</button>
         <button @click="runCommand('step_over_stage')">Step Stage</button>
         <button @click="runCommand('step_over_pipeline')">Step Pipeline</button>
