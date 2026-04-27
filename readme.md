@@ -158,9 +158,9 @@ The debug backend exposes JSON endpoints for the Vue UI:
 
 - `GET /api/cameras`
 - `GET /api/pipelines?camera_id=...`
-- `GET /api/pipelines/draft`
-- `POST /api/pipelines/draft`
-- `POST /api/pipelines/draft/deploy`
+- `GET /api/pipeline_config/pipelines`
+- `POST /api/pipeline_config/pipelines`
+- `POST /api/pipeline_config/pipelines/deploy`
 - `GET /api/debug/state?camera_id=...`
 - `POST /api/debug/breakpoints`
 - `POST /api/debug/command`

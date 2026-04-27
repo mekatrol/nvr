@@ -28,8 +28,8 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
             camera_id = self._query_value(query, "camera_id")
             self._json(api_state.pipelines(camera_id))
             return
-        if parsed.path == "/api/pipelines/draft":
-            self._json(api_state.draft_pipelines())
+        if parsed.path == "/api/pipeline_config/pipelines":
+            self._json(api_state.pipeline_config_pipelines())
             return
         if parsed.path == "/api/debug/state":
             camera_id = self._query_value(query, "camera_id")
@@ -50,21 +50,21 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         api_state = self._api_state()
-        if parsed.path == "/api/pipelines/draft":
+        if parsed.path == "/api/pipeline_config/pipelines":
             body = self._read_json()
             raw_pipelines = body.get("pipelines_config", body)
             if not isinstance(raw_pipelines, dict):
                 self._json({"error": "pipelines config is required"}, status=400)
                 return
             try:
-                self._json(api_state.save_draft_pipelines(raw_pipelines))
+                self._json(api_state.save_pipeline_config_pipelines(raw_pipelines))
             except ValueError as ex:
                 self._json({"error": str(ex)}, status=400)
             return
 
-        if parsed.path == "/api/pipelines/draft/deploy":
+        if parsed.path == "/api/pipeline_config/pipelines/deploy":
             try:
-                self._json(api_state.deploy_draft_pipelines())
+                self._json(api_state.deploy_pipeline_config_pipelines())
             except ValueError as ex:
                 self._json({"error": str(ex)}, status=400)
             return
@@ -170,4 +170,4 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
 
     @staticmethod
     def _no_deployed_pipeline_error() -> str:
-        return "No draft pipeline is available. Generate or save a draft before running it."
+        return "No pipeline configuration is available. Generate or save pipelines before running it."

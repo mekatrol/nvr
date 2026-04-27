@@ -77,10 +77,10 @@ const metadata = ref<Record<string, unknown>>({})
 const selectedBreakpoint = ref('')
 const apiError = ref('')
 const isLoadingCameras = ref(false)
-const draftEnabled = ref(true)
-const draftFrameIntervalSeconds = ref(String(defaultPipelineFrameIntervalSeconds))
-const draftPipelines = ref<Pipeline[]>([])
-const draftEdges = ref<Edge[]>([])
+const pipelineConfigEnabled = ref(true)
+const pipelineConfigFrameIntervalSeconds = ref(String(defaultPipelineFrameIntervalSeconds))
+const pipelineConfigPipelines = ref<Pipeline[]>([])
+const pipelineConfigEdges = ref<Edge[]>([])
 const currentView = ref<'index' | 'debug'>('index')
 const debugPipelineId = ref('')
 const selectedPipelineId = ref('')
@@ -104,7 +104,7 @@ const currentAction = ref('')
 const vscodeWebUrl = computed(
   () =>
     import.meta.env.VITE_VSCODE_WEB_URL ||
-    'http://127.0.0.1:8000/?folder=/home/dad/nvr/pipelines/draft',
+    'http://127.0.0.1:8000/?folder=/home/dad/nvr/pipeline_config/pipelines',
 )
 const isEditorRoute = computed(() => route.path === '/editor')
 
@@ -119,18 +119,18 @@ const visiblePipelines = computed(() => {
   return pipelines.value.filter((pipeline) => pipeline.id === debugPipelineId.value)
 })
 
-const selectedDraftPipeline = computed(() =>
-  draftPipelines.value.find((pipeline) => pipeline.id === selectedPipelineId.value),
+const selectedPipelinesPipeline = computed(() =>
+  pipelineConfigPipelines.value.find((pipeline) => pipeline.id === selectedPipelineId.value),
 )
 
-const selectedDraftStage = computed(() =>
-  selectedDraftPipeline.value?.stages.find((stage) => stage.id === selectedStageId.value),
+const selectedPipelinesStage = computed(() =>
+  selectedPipelinesPipeline.value?.stages.find((stage) => stage.id === selectedStageId.value),
 )
 
 const isActionBusy = computed(() => currentAction.value.length > 0)
 const hasSelectedCamera = computed(() => selectedCameraId.value.length > 0)
-const hasDraftPipeline = computed(() => Boolean(selectedDraftPipeline.value))
-const hasDraftStage = computed(() => Boolean(selectedDraftStage.value))
+const hasPipelinesPipeline = computed(() => Boolean(selectedPipelinesPipeline.value))
+const hasPipelinesStage = computed(() => Boolean(selectedPipelinesStage.value))
 const canRun = computed(
   () => hasSelectedCamera.value && !isRunLoopActive.value && !isActionBusy.value,
 )
@@ -138,10 +138,10 @@ const canStop = computed(() => isRunLoopActive.value && !isActionBusy.value)
 const canStep = computed(
   () => hasSelectedCamera.value && !isRunLoopActive.value && !isActionBusy.value,
 )
-const canEditDraft = computed(() => !isRunLoopActive.value && !isActionBusy.value)
-const canApplyPipeline = computed(() => canEditDraft.value && hasDraftPipeline.value)
-const canApplyStage = computed(() => canEditDraft.value && hasDraftStage.value)
-const canAddEdge = computed(() => canEditDraft.value && draftPipelines.value.length >= 2)
+const canEditPipelines = computed(() => !isRunLoopActive.value && !isActionBusy.value)
+const canApplyPipeline = computed(() => canEditPipelines.value && hasPipelinesPipeline.value)
+const canApplyStage = computed(() => canEditPipelines.value && hasPipelinesStage.value)
+const canAddEdge = computed(() => canEditPipelines.value && pipelineConfigPipelines.value.length >= 2)
 const canSetBreakpoint = computed(
   () =>
     hasSelectedCamera.value &&
@@ -173,16 +173,16 @@ async function loadPipelines() {
   edges.value = graph.edges
 }
 
-async function loadDraftPipelines() {
-  const graph = await getJson<PipelinesResponse>('/api/pipelines/draft')
-  draftEnabled.value = graph.enabled
-  draftFrameIntervalSeconds.value = String(
+async function loadPipelineConfigPipelines() {
+  const graph = await getJson<PipelinesResponse>('/api/pipeline_config/pipelines')
+  pipelineConfigEnabled.value = graph.enabled
+  pipelineConfigFrameIntervalSeconds.value = String(
     graph.frame_interval_seconds ?? defaultPipelineFrameIntervalSeconds,
   )
-  draftPipelines.value = graph.pipelines
-  draftEdges.value = graph.edges
-  if (!selectedPipelineId.value && draftPipelines.value[0]) {
-    selectPipeline(draftPipelines.value[0].id)
+  pipelineConfigPipelines.value = graph.pipelines
+  pipelineConfigEdges.value = graph.edges
+  if (!selectedPipelineId.value && pipelineConfigPipelines.value[0]) {
+    selectPipeline(pipelineConfigPipelines.value[0].id)
   } else {
     refreshSelectedEditors()
   }
@@ -283,24 +283,24 @@ async function refreshCamera() {
     showPipelineIndex()
     await loadPipelines()
     await loadDebugState()
-    await loadDraftPipelines()
+    await loadPipelineConfigPipelines()
   } catch {
     return
   }
 }
 
-async function saveDraftPipelines() {
+async function savePipelineConfigPipelines() {
   deployStatus.value = ''
-  const validationError = validateDraftPipelineReferences()
+  const validationError = validatePipelinesPipelineReferences()
   if (validationError) {
     apiError.value = validationError
     return
   }
-  const saved = await postJson<PipelinesResponse>('/api/pipelines/draft', toPipelinesPayload())
-  draftPipelines.value = saved.pipelines
-  draftEdges.value = saved.edges
+  const saved = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines', toPipelinesPayload())
+  pipelineConfigPipelines.value = saved.pipelines
+  pipelineConfigEdges.value = saved.edges
   refreshSelectedEditors()
-  deployStatus.value = 'Draft saved'
+  deployStatus.value = 'Pipelines saved'
 }
 
 async function withAction<T>(action: string, task: () => Promise<T>): Promise<T | undefined> {
@@ -313,32 +313,32 @@ async function withAction<T>(action: string, task: () => Promise<T>): Promise<T 
   }
 }
 
-async function deployDraftPipelines() {
-  await saveDraftPipelines()
-  const deployed = await postJson<PipelinesResponse>('/api/pipelines/draft/deploy', {})
+async function deployPipelineConfigPipelines() {
+  await savePipelineConfigPipelines()
+  const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
   edges.value = deployed.edges
   await loadDebugState()
-  deployStatus.value = 'Draft deployed and server config reloaded'
+  deployStatus.value = 'Pipelines deployed and server config reloaded'
 }
 
 async function generateExampleResizePipeline() {
   const generated = await postJson<PipelinesResponse>('/api/pipelines/examples/resize', {})
-  draftEnabled.value = generated.enabled
-  draftFrameIntervalSeconds.value = String(
+  pipelineConfigEnabled.value = generated.enabled
+  pipelineConfigFrameIntervalSeconds.value = String(
     generated.frame_interval_seconds ?? defaultPipelineFrameIntervalSeconds,
   )
-  draftPipelines.value = generated.pipelines
-  draftEdges.value = generated.edges
+  pipelineConfigPipelines.value = generated.pipelines
+  pipelineConfigEdges.value = generated.edges
   selectPipeline('example-resize')
-  deployStatus.value = 'Example resize pipeline generated as draft. Use Debugger to run it, or Deploy Draft when ready.'
+  deployStatus.value = 'Example resize pipeline generated. Use Debugger to run it, or deploy pipelines when ready.'
 }
 
-async function deployDraftFromEditor() {
-  const deployed = await postJson<PipelinesResponse>('/api/pipelines/draft/deploy', {})
+async function deployPipelinesFromEditor() {
+  const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
   edges.value = deployed.edges
-  deployStatus.value = 'Draft deployed and server config reloaded'
+  deployStatus.value = 'Pipelines deployed and server config reloaded'
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -394,8 +394,8 @@ function formatJson(value: unknown) {
 }
 
 function addPipeline() {
-  const baseId = uniqueId('pipeline', draftPipelines.value.map((pipeline) => pipeline.id))
-  draftPipelines.value.push({
+  const baseId = uniqueId('pipeline', pipelineConfigPipelines.value.map((pipeline) => pipeline.id))
+  pipelineConfigPipelines.value.push({
     id: baseId,
     name: baseId,
     enabled: true,
@@ -416,13 +416,13 @@ function deleteSelectedPipeline() {
 
 function deletePipeline(pipelineId: string) {
   if (!pipelineId) return
-  draftPipelines.value = draftPipelines.value.filter(
+  pipelineConfigPipelines.value = pipelineConfigPipelines.value.filter(
     (pipeline) => pipeline.id !== pipelineId,
   )
-  draftEdges.value = draftEdges.value.filter(
+  pipelineConfigEdges.value = pipelineConfigEdges.value.filter(
     (edge) => edge.from !== pipelineId && edge.to !== pipelineId,
   )
-  selectedPipelineId.value = draftPipelines.value[0]?.id ?? ''
+  selectedPipelineId.value = pipelineConfigPipelines.value[0]?.id ?? ''
   selectedStageId.value = ''
   if (debugPipelineId.value === pipelineId) {
     showPipelineIndex()
@@ -431,12 +431,12 @@ function deletePipeline(pipelineId: string) {
 }
 
 function addStage() {
-  if (!selectedDraftPipeline.value) return
+  if (!selectedPipelinesPipeline.value) return
   const baseId = uniqueId(
     'stage',
-    selectedDraftPipeline.value.stages.map((stage) => stage.id),
+    selectedPipelinesPipeline.value.stages.map((stage) => stage.id),
   )
-  selectedDraftPipeline.value.stages.push({
+  selectedPipelinesPipeline.value.stages.push({
     id: baseId,
     enabled: true,
     filename: 'nvr_common/pipeline/sample_stages/metadata_annotation_stage.py',
@@ -457,7 +457,7 @@ function deleteSelectedStage() {
 }
 
 function deleteStage(pipelineId: string, stageId: string) {
-  const pipeline = draftPipelines.value.find((candidate) => candidate.id === pipelineId)
+  const pipeline = pipelineConfigPipelines.value.find((candidate) => candidate.id === pipelineId)
   if (!pipeline || !stageId) return
   pipeline.stages = pipeline.stages.filter((stage) => stage.id !== stageId)
   if (selectedPipelineId.value === pipelineId && selectedStageId.value === stageId) {
@@ -468,7 +468,7 @@ function deleteStage(pipelineId: string, stageId: string) {
 
 function selectPipeline(pipelineId: string) {
   selectedPipelineId.value = pipelineId
-  selectedStageId.value = selectedDraftPipeline.value?.stages[0]?.id ?? ''
+  selectedStageId.value = selectedPipelinesPipeline.value?.stages[0]?.id ?? ''
   refreshSelectedEditors()
 }
 
@@ -484,7 +484,7 @@ function selectStageInPipeline(pipelineId: string, stageId: string) {
 }
 
 function applyPipelineEdits() {
-  const pipeline = selectedDraftPipeline.value
+  const pipeline = selectedPipelinesPipeline.value
   if (!pipeline) return
   const nextId = selectedPipelineIdEdit.value.trim()
   if (!nextId) return
@@ -495,7 +495,7 @@ function applyPipelineEdits() {
     .split(',')
     .map((input) => input.trim())
     .filter((input) => input.length > 0)
-  for (const edge of draftEdges.value) {
+  for (const edge of pipelineConfigEdges.value) {
     if (edge.from === oldId) edge.from = nextId
     if (edge.to === oldId) edge.to = nextId
   }
@@ -504,7 +504,7 @@ function applyPipelineEdits() {
 
 async function applyStageEdits() {
   if (isActionBusy.value) return
-  const stage = selectedDraftStage.value
+  const stage = selectedPipelinesStage.value
   if (!stage) return
   const nextId = selectedStageIdEdit.value.trim()
   if (!nextId) return
@@ -524,7 +524,7 @@ async function applyStageEdits() {
   currentAction.value = 'apply_stage'
   try {
     await stopRunLoop(false)
-    await saveDraftPipelines()
+    await savePipelineConfigPipelines()
     await loadPipelines()
     if (selectedCameraId.value) {
       await runCommand('run')
@@ -538,25 +538,25 @@ async function applyStageEdits() {
 }
 
 function addEdge() {
-  if (draftPipelines.value.length < 2) return
-  const sourcePipeline = draftPipelines.value[0]
-  const targetPipeline = draftPipelines.value[1]
+  if (pipelineConfigPipelines.value.length < 2) return
+  const sourcePipeline = pipelineConfigPipelines.value[0]
+  const targetPipeline = pipelineConfigPipelines.value[1]
   if (!sourcePipeline || !targetPipeline) return
   const from = sourcePipeline.id
   const to = targetPipeline.id
-  draftEdges.value.push({ from, to })
+  pipelineConfigEdges.value.push({ from, to })
 }
 
 function deleteEdge(index: number) {
-  draftEdges.value.splice(index, 1)
+  pipelineConfigEdges.value.splice(index, 1)
 }
 
 function refreshSelectedEditors() {
-  const pipeline = selectedDraftPipeline.value
+  const pipeline = selectedPipelinesPipeline.value
   selectedPipelineIdEdit.value = pipeline?.id ?? ''
   selectedPipelineNameEdit.value = pipeline?.name ?? ''
   selectedPipelineRequiredInputs.value = pipeline?.required_inputs.join(', ') ?? ''
-  const stage = selectedDraftStage.value
+  const stage = selectedPipelinesStage.value
   selectedStageIdEdit.value = stage?.id ?? ''
   selectedStageModule.value = stage?.module ?? ''
   selectedStageClassName.value = stage?.class_name ?? ''
@@ -566,11 +566,11 @@ function refreshSelectedEditors() {
 }
 
 function toPipelinesPayload() {
-  const interval = Number(draftFrameIntervalSeconds.value)
+  const interval = Number(pipelineConfigFrameIntervalSeconds.value)
   return {
-    enabled: draftEnabled.value,
-    frame_interval_seconds: Number.isFinite(interval) ? interval : draftFrameIntervalSeconds.value,
-    pipelines: draftPipelines.value.map((pipeline) => ({
+    enabled: pipelineConfigEnabled.value,
+    frame_interval_seconds: Number.isFinite(interval) ? interval : pipelineConfigFrameIntervalSeconds.value,
+    pipelines: pipelineConfigPipelines.value.map((pipeline) => ({
       id: pipeline.id,
       name: pipeline.name || pipeline.id,
       enabled: pipeline.enabled,
@@ -586,7 +586,7 @@ function toPipelinesPayload() {
         config: stage.config,
       })),
     })),
-    edges: draftEdges.value,
+    edges: pipelineConfigEdges.value,
   }
 }
 
@@ -616,10 +616,10 @@ function showPipelineIndex() {
   debugPipelineId.value = ''
 }
 
-function validateDraftPipelineReferences() {
-  const pipelineIds = new Set(draftPipelines.value.map((pipeline) => pipeline.id))
+function validatePipelinesPipelineReferences() {
+  const pipelineIds = new Set(pipelineConfigPipelines.value.map((pipeline) => pipeline.id))
   const downstream = new Map<string, string[]>()
-  for (const pipeline of draftPipelines.value) {
+  for (const pipeline of pipelineConfigPipelines.value) {
     for (const stage of pipeline.stages) {
       if (!stage.pipeline) continue
       if (!pipelineIds.has(stage.pipeline)) {
@@ -649,7 +649,7 @@ function validateDraftPipelineReferences() {
     return null
   }
 
-  for (const pipeline of draftPipelines.value) {
+  for (const pipeline of pipelineConfigPipelines.value) {
     const error = visit(pipeline.id)
     if (error) return error
   }
@@ -686,8 +686,8 @@ onBeforeUnmount(() => {
         <span>pipeline_conf.yaml and Python stage files</span>
       </div>
       <nav>
-        <button :disabled="!canEditDraft" @click="withAction('example_resize', generateExampleResizePipeline)">Example Resize</button>
-        <button :disabled="!canEditDraft" @click="withAction('deploy_draft', deployDraftFromEditor)">Deploy Draft</button>
+        <button :disabled="!canEditPipelines" @click="withAction('example_resize', generateExampleResizePipeline)">Example Resize</button>
+        <button :disabled="!canEditPipelines" @click="withAction('deploy_pipelines', deployPipelinesFromEditor)">Deploy Pipelines</button>
         <RouterLink to="/">Debugger</RouterLink>
         <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
       </nav>
@@ -705,7 +705,7 @@ onBeforeUnmount(() => {
       ></iframe>
       <div v-if="vscodeLoadFailed" class="vscode-error">
         <strong>VS Code Web is not available.</strong>
-        <span>Start it with code serve-web --host 127.0.0.1 --port 8000 --without-connection-token --accept-server-license-terms --default-folder /home/dad/nvr/pipelines, then reload this view.</span>
+        <span>Start it with code serve-web --host 127.0.0.1 --port 8000 --without-connection-token --accept-server-license-terms --default-folder /home/dad/nvr/pipeline_config, then reload this view.</span>
       </div>
     </section>
   </main>
@@ -742,15 +742,15 @@ onBeforeUnmount(() => {
       <section class="tree-panel">
         <header>
           <strong>Pipeline Tree</strong>
-          <button title="Add pipeline" :disabled="!canEditDraft" @click="addPipelineFromTree">
+          <button title="Add pipeline" :disabled="!canEditPipelines" @click="addPipelineFromTree">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path :d="iconPaths.plus" />
             </svg>
           </button>
         </header>
         <div class="tree">
-          <div v-if="draftPipelines.length === 0" class="tree-empty">No pipelines</div>
-          <div v-for="pipeline in draftPipelines" :key="pipeline.id" class="tree-branch">
+          <div v-if="pipelineConfigPipelines.length === 0" class="tree-empty">No pipelines</div>
+          <div v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" class="tree-branch">
             <div
               class="tree-row"
               :class="{ selected: pipeline.id === selectedPipelineId && !selectedStageId }"
@@ -763,12 +763,12 @@ onBeforeUnmount(() => {
                 </svg>
               </span>
               <span class="tree-label">{{ pipeline.name || pipeline.id }}</span>
-              <button title="Add stage" :disabled="!canEditDraft" @click.stop="addStageToPipeline(pipeline.id)">
+              <button title="Add stage" :disabled="!canEditPipelines" @click.stop="addStageToPipeline(pipeline.id)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="iconPaths.plus" />
                 </svg>
               </button>
-              <button title="Remove pipeline" :disabled="!canEditDraft" @click.stop="deletePipeline(pipeline.id)">
+              <button title="Remove pipeline" :disabled="!canEditPipelines" @click.stop="deletePipeline(pipeline.id)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="iconPaths.trash" />
                 </svg>
@@ -789,7 +789,7 @@ onBeforeUnmount(() => {
                   </svg>
                 </span>
                 <span class="tree-label">{{ stage.id }}</span>
-                <button title="Remove stage" :disabled="!canEditDraft" @click.stop="deleteStage(pipeline.id, stage.id)">
+                <button title="Remove stage" :disabled="!canEditPipelines" @click.stop="deleteStage(pipeline.id, stage.id)">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="iconPaths.trash" />
                   </svg>
@@ -879,11 +879,11 @@ onBeforeUnmount(() => {
 
       <section class="editor">
         <header class="editor-header">
-          <strong>Pipeline Draft</strong>
+          <strong>Pipeline Configuration</strong>
           <div class="editor-actions">
-            <button :disabled="!canEditDraft" @click="withAction('reload_draft', loadDraftPipelines)">Reload Draft</button>
-            <button :disabled="!canEditDraft" @click="withAction('save_draft', saveDraftPipelines)">Save Draft</button>
-            <button :disabled="!canEditDraft" @click="withAction('deploy_draft', deployDraftPipelines)">Deploy</button>
+            <button :disabled="!canEditPipelines" @click="withAction('reload_pipelines', loadPipelineConfigPipelines)">Reload Pipelines</button>
+            <button :disabled="!canEditPipelines" @click="withAction('save_pipelines', savePipelineConfigPipelines)">Save Pipelines</button>
+            <button :disabled="!canEditPipelines" @click="withAction('deploy_pipelines', deployPipelineConfigPipelines)">Deploy</button>
           </div>
         </header>
 
@@ -891,18 +891,18 @@ onBeforeUnmount(() => {
           <section class="editor-panel">
             <header>
               <strong>Pipelines</strong>
-              <button :disabled="!canEditDraft" @click="addPipeline">Add</button>
+              <button :disabled="!canEditPipelines" @click="addPipeline">Add</button>
             </header>
             <label class="inline-field">
               <span>Enabled</span>
-              <input v-model="draftEnabled" type="checkbox" />
+              <input v-model="pipelineConfigEnabled" type="checkbox" />
             </label>
             <label class="field light">
               <span>Frame interval seconds</span>
-              <input v-model="draftFrameIntervalSeconds" type="text" inputmode="decimal" />
+              <input v-model="pipelineConfigFrameIntervalSeconds" type="text" inputmode="decimal" />
             </label>
             <button
-              v-for="pipeline in draftPipelines"
+              v-for="pipeline in pipelineConfigPipelines"
               :key="pipeline.id"
               class="stage-row"
               :class="{ selected: pipeline.id === selectedPipelineId }"
@@ -928,7 +928,7 @@ onBeforeUnmount(() => {
             </label>
             <label class="inline-field">
               <span>Enabled</span>
-              <input v-if="selectedDraftPipeline" v-model="selectedDraftPipeline.enabled" type="checkbox" />
+              <input v-if="selectedPipelinesPipeline" v-model="selectedPipelinesPipeline.enabled" type="checkbox" />
             </label>
             <label class="field light">
               <span>Required inputs</span>
@@ -941,7 +941,7 @@ onBeforeUnmount(() => {
               <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
             </header>
             <button
-              v-for="stage in selectedDraftPipeline?.stages ?? []"
+              v-for="stage in selectedPipelinesPipeline?.stages ?? []"
               :key="stage.id"
               class="stage-row"
               :class="{ selected: stage.id === selectedStageId }"
@@ -963,7 +963,7 @@ onBeforeUnmount(() => {
             </label>
             <label class="inline-field">
               <span>Enabled</span>
-              <input v-if="selectedDraftStage" v-model="selectedDraftStage.enabled" type="checkbox" />
+              <input v-if="selectedPipelinesStage" v-model="selectedPipelinesStage.enabled" type="checkbox" />
             </label>
             <label class="field light">
               <span>Filename</span>
@@ -973,7 +973,7 @@ onBeforeUnmount(() => {
               <span>Pipeline reference</span>
               <select v-model="selectedStagePipeline">
                 <option value=""></option>
-                <option v-for="pipeline in draftPipelines" :key="pipeline.id" :value="pipeline.id">
+                <option v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" :value="pipeline.id">
                   {{ pipeline.id }}
                 </option>
               </select>
@@ -998,18 +998,18 @@ onBeforeUnmount(() => {
               <strong>Edges</strong>
               <button :disabled="!canAddEdge" @click="addEdge">Add</button>
             </header>
-            <div v-for="(edge, index) in draftEdges" :key="index" class="edge-row">
+            <div v-for="(edge, index) in pipelineConfigEdges" :key="index" class="edge-row">
               <select v-model="edge.from">
-                <option v-for="pipeline in draftPipelines" :key="pipeline.id" :value="pipeline.id">
+                <option v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" :value="pipeline.id">
                   {{ pipeline.id }}
                 </option>
               </select>
               <select v-model="edge.to">
-                <option v-for="pipeline in draftPipelines" :key="pipeline.id" :value="pipeline.id">
+                <option v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" :value="pipeline.id">
                   {{ pipeline.id }}
                 </option>
               </select>
-              <button :disabled="!canEditDraft" @click="deleteEdge(index)">Delete</button>
+              <button :disabled="!canEditPipelines" @click="deleteEdge(index)">Delete</button>
             </div>
           </section>
         </div>

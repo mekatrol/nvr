@@ -159,25 +159,25 @@ class DebugApiTest(unittest.TestCase):
             temp_path = Path(temp_dir)
             self._config(temp_path)
 
-            self.assertTrue((temp_path / "pipelines").is_dir())
-            self.assertTrue((temp_path / "pipelines" / "draft").is_dir())
-            self.assertTrue((temp_path / "pipelines" / "deployed").is_dir())
+            self.assertTrue((temp_path / "pipeline_config").is_dir())
+            self.assertTrue((temp_path / "pipeline_config" / "pipelines").is_dir())
+            self.assertTrue((temp_path / "pipeline_config" / "deployed").is_dir())
 
-    def test_pipeline_draft_save_does_not_modify_deployed_config(self):
+    def test_pipeline_config_save_does_not_modify_deployed_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config = self._config(temp_path)
             TestableDebugApiHandler.api_state = DebugApiState(config, FakeFrameSource)
 
             save_handler = TestableDebugApiHandler(
-                "/api/pipelines/draft",
+                "/api/pipeline_config/pipelines",
                 method="POST",
                 body=json.dumps(
                     {
                         "enabled": True,
                         "frame_interval_seconds": 2,
                         "pipelines": [
-                            {"id": "draft-only", "enabled": True, "stages": []}
+                            {"id": "pipelines-only", "enabled": True, "stages": []}
                         ],
                         "edges": [],
                     }
@@ -186,8 +186,10 @@ class DebugApiTest(unittest.TestCase):
             save_handler.do_POST()
 
             config_data = yaml.safe_load((temp_path / "config.yaml").read_text())
-            draft_data = yaml.safe_load(
-                (temp_path / "pipelines" / "draft" / "pipelines.yaml").read_text()
+            pipelines_data = yaml.safe_load(
+                (
+                    temp_path / "pipeline_config" / "pipelines" / "pipelines.yaml"
+                ).read_text()
             )
 
             self.assertEqual(200, save_handler.status)
@@ -195,18 +197,20 @@ class DebugApiTest(unittest.TestCase):
                 "preprocessing", config_data["pipelines"]["pipelines"][0]["id"]
             )
             self.assertEqual(
-                "draft-only", draft_data["pipelines"][0]["id"]
+                "pipelines-only", pipelines_data["pipelines"][0]["id"]
             )
 
-    def test_pipeline_draft_deploy_updates_deployed_file_and_reloads_sessions(self):
+    def test_pipeline_config_deploy_updates_deployed_file_and_reloads_sessions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config = self._config(temp_path)
             state = DebugApiState(config, FakeFrameSource)
             TestableDebugApiHandler.api_state = state
             self.assertIsNotNone(state.session("driveway"))
-            draft_stage_path = temp_path / "pipelines" / "draft" / "custom_stage.py"
-            draft_stage_path.write_text(
+            pipelines_stage_path = (
+                temp_path / "pipeline_config" / "pipelines" / "custom_stage.py"
+            )
+            pipelines_stage_path.write_text(
                 "from nvr_common.pipeline import PipelineStageResult\n"
                 "\n"
                 "class CustomStage:\n"
@@ -219,7 +223,7 @@ class DebugApiTest(unittest.TestCase):
             )
 
             save_handler = TestableDebugApiHandler(
-                "/api/pipelines/draft",
+                "/api/pipeline_config/pipelines",
                 method="POST",
                 body=json.dumps(
                     {
@@ -233,7 +237,7 @@ class DebugApiTest(unittest.TestCase):
                                     {
                                         "id": "custom",
                                         "enabled": True,
-                                        "filename": str(draft_stage_path),
+                                        "filename": str(pipelines_stage_path),
                                         "class": "CustomStage",
                                         "config": {},
                                     }
@@ -245,7 +249,9 @@ class DebugApiTest(unittest.TestCase):
                 ).encode("utf-8"),
             )
             save_handler.do_POST()
-            deploy_handler = TestableDebugApiHandler("/api/pipelines/draft/deploy")
+            deploy_handler = TestableDebugApiHandler(
+                "/api/pipeline_config/pipelines/deploy"
+            )
             deploy_handler.do_POST()
 
             config_data = yaml.safe_load((temp_path / "config.yaml").read_text())
@@ -254,10 +260,12 @@ class DebugApiTest(unittest.TestCase):
             pipelines = json.loads(pipelines_handler.wfile.getvalue().decode("utf-8"))
             deployed_data = yaml.safe_load(
                 (
-                    temp_path / "pipelines" / "deployed" / "pipelines.yaml"
+                    temp_path / "pipeline_config" / "deployed" / "pipelines.yaml"
                 ).read_text()
             )
-            deployed_stage_path = temp_path / "pipelines" / "deployed" / "custom_stage.py"
+            deployed_stage_path = (
+                temp_path / "pipeline_config" / "deployed" / "custom_stage.py"
+            )
 
             self.assertEqual(200, deploy_handler.status)
             self.assertEqual(
@@ -285,21 +293,25 @@ class DebugApiTest(unittest.TestCase):
             handler.do_POST()
 
             response = json.loads(handler.wfile.getvalue().decode("utf-8"))
-            draft_path = temp_path / "pipelines" / "draft" / "pipelines.yaml"
-            stage_path = temp_path / "pipelines" / "draft" / "example_resize_stage.py"
-            deployed_path = temp_path / "pipelines" / "deployed" / "pipelines.yaml"
-            deployed_stage_path = (
-                temp_path / "pipelines" / "deployed" / "example_resize_stage.py"
+            pipelines_path = (
+                temp_path / "pipeline_config" / "pipelines" / "pipelines.yaml"
             )
-            draft_data = yaml.safe_load(draft_path.read_text(encoding="utf-8"))
+            stage_path = (
+                temp_path / "pipeline_config" / "pipelines" / "example_resize_stage.py"
+            )
+            deployed_path = temp_path / "pipeline_config" / "deployed" / "pipelines.yaml"
+            deployed_stage_path = (
+                temp_path / "pipeline_config" / "deployed" / "example_resize_stage.py"
+            )
+            pipelines_data = yaml.safe_load(pipelines_path.read_text(encoding="utf-8"))
             response_pipeline = next(
                 pipeline
                 for pipeline in response["pipelines"]
                 if pipeline["id"] == "example-resize"
             )
-            draft_pipeline = next(
+            pipeline_config_pipeline = next(
                 pipeline
-                for pipeline in draft_data["pipelines"]
+                for pipeline in pipelines_data["pipelines"]
                 if pipeline["id"] == "example-resize"
             )
 
@@ -312,16 +324,16 @@ class DebugApiTest(unittest.TestCase):
             self.assertTrue(
                 any(
                     pipeline["id"] == "preprocessing"
-                    for pipeline in draft_data["pipelines"]
+                    for pipeline in pipelines_data["pipelines"]
                 )
             )
             self.assertEqual(
                 str(stage_path),
-                draft_pipeline["stages"][0]["filename"],
+                pipeline_config_pipeline["stages"][0]["filename"],
             )
             self.assertEqual(
                 {"output_width": 640, "output_height": 360},
-                draft_pipeline["stages"][0]["config"],
+                pipeline_config_pipeline["stages"][0]["config"],
             )
 
             run_handler = TestableDebugApiHandler(
@@ -370,7 +382,7 @@ class DebugApiTest(unittest.TestCase):
                 ],
                 "edges": [],
             },
-            pipelines_storage_path="pipelines",
+            pipeline_config_storage_path="pipeline_config",
         )
         set_config_env(config_path)
         return Config()

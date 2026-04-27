@@ -5,7 +5,7 @@ log_path: ../../nvr/logs
 ffmpeg_binary: ffmpeg # or full path: /usr/bin/ffmpeg
 
 # Folder for editable and deployed pipeline YAML files
-pipelines_storage_path: ../../nvr/pipelines
+pipeline_config_storage_path: ../../nvr/pipeline_config
 
 # Stream settings
 stream:

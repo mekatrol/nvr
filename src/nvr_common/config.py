@@ -31,7 +31,7 @@ class Config(Singleton, MutableMapping):
     KEY_CAMERA_ENABLED: str = "enabled"
     KEY_CAMERA_RTSP_URL: str = "rtsp_url"
     KEY_CAMERA_LOG_FFMPEG: str = "log_ffmpeg"
-    KEY_PIPELINES_STORAGE_PATH: str = "pipelines_storage_path"
+    KEY_PIPELINE_CONFIG_STORAGE_PATH: str = "pipeline_config_storage_path"
     KEY_PIPELINES_CONFIG: str = "pipelines"
     KEY_PIPELINES_CONFIG_FILENAME: str = "pipeline_conf.yaml"
     KEY_PIPELINES_ENABLED: str = "enabled"
@@ -100,27 +100,27 @@ class Config(Singleton, MutableMapping):
 
         # Validate the loaded configuration
         self._validate()
-        pipelines_storage_path = self.get_pipelines_storage_path()
-        pipelines_storage_path.mkdir(parents=True, exist_ok=True)
-        (pipelines_storage_path / "draft").mkdir(parents=True, exist_ok=True)
-        (pipelines_storage_path / "deployed").mkdir(parents=True, exist_ok=True)
+        pipeline_config_storage_path = self.get_pipeline_config_storage_path()
+        pipeline_config_storage_path.mkdir(parents=True, exist_ok=True)
+        (pipeline_config_storage_path / "pipelines").mkdir(parents=True, exist_ok=True)
+        (pipeline_config_storage_path / "deployed").mkdir(parents=True, exist_ok=True)
 
     def get_camera(self, camera_id: str) -> Dict[str, Any]:
         return self.cameras_by_id[camera_id]
 
-    def get_pipelines_storage_path(self) -> Path:
-        raw_path = self._conf.get(self.KEY_PIPELINES_STORAGE_PATH)
+    def get_pipeline_config_storage_path(self) -> Path:
+        raw_path = self._conf.get(self.KEY_PIPELINE_CONFIG_STORAGE_PATH)
         if isinstance(raw_path, str) and raw_path:
             path = Path(raw_path)
         else:
-            path = Path(self.config_path).parent
+            path = Path("pipeline_config")
 
         if not path.is_absolute():
             path = (Path(self.config_path).parent / path).resolve()
         return path
 
     def get_deployed_pipelines_path(self) -> Path:
-        return self.get_pipelines_storage_path() / "deployed" / "pipelines.yaml"
+        return self.get_pipeline_config_storage_path() / "deployed" / "pipelines.yaml"
 
     def get_pipeline_config_path(self) -> Path:
         return Path(self.config_path).with_name(self.KEY_PIPELINES_CONFIG_FILENAME)
@@ -744,11 +744,11 @@ class Config(Singleton, MutableMapping):
         if not isinstance(ffmpeg_binary, str) or not ffmpeg_binary.strip():
             errors.append("ffmpeg_binary must be a non-empty string")
 
-        pipelines_storage_path: Any = self._conf.get(self.KEY_PIPELINES_STORAGE_PATH)
-        if pipelines_storage_path is not None and (
-            not isinstance(pipelines_storage_path, str) or not pipelines_storage_path
+        pipeline_config_storage_path: Any = self._conf.get(self.KEY_PIPELINE_CONFIG_STORAGE_PATH)
+        if pipeline_config_storage_path is not None and (
+            not isinstance(pipeline_config_storage_path, str) or not pipeline_config_storage_path
         ):
-            errors.append("pipelines_storage_path must be a non-empty string")
+            errors.append("pipeline_config_storage_path must be a non-empty string")
 
         # cameras validation
         cameras: Any = self._conf.get(self.KEY_CAMERAS, [])

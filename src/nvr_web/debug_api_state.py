@@ -34,14 +34,14 @@ class DebugApiState:
                         "id": camera.get(Config.KEY_CAMERA_ID),
                         "name": camera.get(Config.KEY_CAMERA_NAME),
                         "enabled": camera.get(Config.KEY_CAMERA_ENABLED, False),
-                        "pipeline_enabled": self.pipelines_store.draft_graph()
+                        "pipeline_enabled": self.pipelines_store.pipeline_config_graph()
                         is not None,
                     }
                 )
         return cameras
 
     def pipelines(self, camera_id: str | None = None) -> dict[str, Any]:
-        graph = self.pipelines_store.draft_graph()
+        graph = self.pipelines_store.pipeline_config_graph()
         if graph is None:
             return {"enabled": False, "pipelines": [], "edges": []}
         return {
@@ -70,23 +70,23 @@ class DebugApiState:
     def session(self, camera_id: str) -> PipelineDebugSession | None:
         if camera_id in self.sessions:
             return self.sessions[camera_id]
-        graph = self.pipelines_store.draft_graph()
+        graph = self.pipelines_store.pipeline_config_graph()
         if graph is None:
             return None
         session = PipelineDebugSession(graph)
         self.sessions[camera_id] = session
         return session
 
-    def draft_pipelines(self) -> dict[str, Any]:
-        return self.pipelines_store.draft_response()
+    def pipeline_config_pipelines(self) -> dict[str, Any]:
+        return self.pipelines_store.pipeline_config_response()
 
-    def save_draft_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
-        response = self.pipelines_store.save_draft_pipelines(raw_pipelines)
+    def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
+        response = self.pipelines_store.save_pipeline_config_pipelines(raw_pipelines)
         self.sessions.clear()
         return response
 
-    def deploy_draft_pipelines(self) -> dict[str, Any]:
-        response = self.pipelines_store.deploy_draft_pipelines()
+    def deploy_pipeline_config_pipelines(self) -> dict[str, Any]:
+        response = self.pipelines_store.deploy_pipeline_config_pipelines()
         self.reload_config()
         return response
 

@@ -19,21 +19,21 @@ class PipelinesStore:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.config_path = Path(config.config_path)
-        self.storage_path = config.get_pipelines_storage_path()
-        self.draft_dir = self.storage_path / "draft"
+        self.storage_path = config.get_pipeline_config_storage_path()
+        self.pipelines_dir = self.storage_path / "pipelines"
         self.deployed_dir = self.storage_path / "deployed"
-        self.draft_path = self.draft_dir / "pipelines.yaml"
+        self.pipelines_path = self.pipelines_dir / "pipelines.yaml"
         self.deployed_path = config.get_deployed_pipelines_path()
         self.pipeline_conf_path = config.get_pipeline_config_path()
-        self.draft_dir.mkdir(parents=True, exist_ok=True)
+        self.pipelines_dir.mkdir(parents=True, exist_ok=True)
         self.deployed_dir.mkdir(parents=True, exist_ok=True)
 
-    def draft_response(self) -> dict[str, Any]:
-        pipelines_config = self.load_draft_pipelines()
+    def pipeline_config_response(self) -> dict[str, Any]:
+        pipelines_config = self.load_pipeline_config_pipelines()
         return self.pipelines_response(pipelines_config)
 
-    def draft_graph(self) -> PipelineGraph | None:
-        pipelines_config = self.load_draft_pipelines()
+    def pipeline_config_graph(self) -> PipelineGraph | None:
+        pipelines_config = self.load_pipeline_config_pipelines()
         if pipelines_config.get(Config.KEY_PIPELINES_ENABLED) is False:
             return None
         graph = Config._parse_pipelines(pipelines_config)
@@ -46,9 +46,9 @@ class PipelinesStore:
             return {"enabled": False, "pipelines": [], "edges": []}
         return self.pipelines_response(pipelines_config)
 
-    def load_draft_pipelines(self) -> dict[str, Any]:
-        if self.draft_path.exists():
-            data = self._load_yaml(self.draft_path)
+    def load_pipeline_config_pipelines(self) -> dict[str, Any]:
+        if self.pipelines_path.exists():
+            data = self._load_yaml(self.pipelines_path)
             pipelines_config = Config._unwrap_pipelines_config(data)
         else:
             pipelines_config = self.config.get_pipelines_config() or {
@@ -62,14 +62,14 @@ class PipelinesStore:
 
         return self._normalize_pipelines_config(pipelines_config)
 
-    def save_draft_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
+    def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
         pipelines_config = self._normalize_pipelines_config(raw_pipelines)
         self._validate_pipelines_config(pipelines_config)
-        self._write_yaml(self.draft_path, pipelines_config)
+        self._write_yaml(self.pipelines_path, pipelines_config)
         return self.pipelines_response(pipelines_config)
 
-    def deploy_draft_pipelines(self) -> dict[str, Any]:
-        pipelines_config = self.load_draft_pipelines()
+    def deploy_pipeline_config_pipelines(self) -> dict[str, Any]:
+        pipelines_config = self.load_pipeline_config_pipelines()
         self._validate_pipelines_config(pipelines_config)
         deployed_config = self._copy_stage_files_to_deployed(pipelines_config)
         self._validate_pipelines_config(deployed_config)
@@ -77,10 +77,10 @@ class PipelinesStore:
         return self.pipelines_response(deployed_config)
 
     def generate_example_resize_pipeline(self) -> dict[str, Any]:
-        stage_path = self.draft_dir / self.EXAMPLE_RESIZE_STAGE_FILENAME
+        stage_path = self.pipelines_dir / self.EXAMPLE_RESIZE_STAGE_FILENAME
         stage_path.write_text(self._example_resize_stage_source(), encoding="utf-8")
 
-        pipelines_config = self.load_draft_pipelines()
+        pipelines_config = self.load_pipeline_config_pipelines()
         pipelines_config[Config.KEY_PIPELINES_ENABLED] = True
         pipelines_config[Config.KEY_PIPELINE_FRAME_INTERVAL_SECONDS] = (
             self.DEFAULT_FRAME_INTERVAL_SECONDS
@@ -93,7 +93,7 @@ class PipelinesStore:
         ]
         pipelines.append(self._example_resize_pipeline_config(stage_path))
         self._validate_pipelines_config(pipelines_config)
-        self._write_yaml(self.draft_path, pipelines_config)
+        self._write_yaml(self.pipelines_path, pipelines_config)
         return self.pipelines_response(pipelines_config)
 
     def pipelines_response(self, pipelines_config: dict[str, Any]) -> dict[str, Any]:
@@ -104,7 +104,7 @@ class PipelinesStore:
             "frame_interval_seconds": pipelines_config.get(
                 Config.KEY_PIPELINE_FRAME_INTERVAL_SECONDS
             ),
-            "draft_path": str(self.draft_path),
+            "pipelines_path": str(self.pipelines_path),
             "deployed_path": str(self.deployed_path),
             "pipeline_conf_path": str(self.pipeline_conf_path),
             "config_path": str(self.config_path),

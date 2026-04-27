@@ -15,7 +15,7 @@ def write_config(
     path: Path,
     pipelines: dict,
     cameras: list[dict] | None = None,
-    pipelines_storage_path: str | None = None,
+    pipeline_config_storage_path: str | None = None,
 ):
     config = {
         "log_path": "../../nvr/logs",
@@ -39,8 +39,8 @@ def write_config(
             }
         ],
     }
-    if pipelines_storage_path is not None:
-        config["pipelines_storage_path"] = pipelines_storage_path
+    if pipeline_config_storage_path is not None:
+        config["pipeline_config_storage_path"] = pipeline_config_storage_path
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
 
