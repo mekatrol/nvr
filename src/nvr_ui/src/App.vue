@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
+import MainNavBar from './components/MainNavBar.vue'
 
 type Camera = {
   id: string
@@ -79,24 +80,14 @@ type LogSeverity = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
 
 const logSeverityOptions: LogSeverity[] = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
 
-const iconPaths = {
-  debugger: 'M4 5h16v10H4zM8 19h8M10 15v4M14 15v4M8 9h8M8 12h5',
-  editor: 'M4 20h16M5 16l10.5-10.5a2.1 2.1 0 0 1 3 3L8 19H5z',
-  log: 'M6 4h12v16H6zM9 8h6M9 12h6M9 16h4',
-  pipeline:
-    'M3 5.5A2.5 2.5 0 0 1 5.5 3H9l2 2h7.5A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z',
-  stage: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5',
-  file: 'M6 3h8l4 4v14H6zM14 3v5h5',
-  link: 'M10 13a5 5 0 0 0 7.5.5l2-2A5 5 0 0 0 12.5 4l-1 1M14 11a5 5 0 0 0-7.5-.5l-2 2A5 5 0 0 0 11.5 20l1-1',
-  plus: 'M12 5v14M5 12h14',
-  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3',
+const materialIcons = {
+  pipeline: 'account_tree',
+  stage: 'deployed_code',
+  file: 'description',
+  link: 'link',
+  plus: 'add',
+  trash: 'delete',
 } as const
-
-const primaryNavItems = [
-  { to: '/', label: 'Debugger', icon: 'debugger' },
-  { to: '/editor', label: 'Editor', icon: 'editor' },
-  { to: '/log', label: 'Log', icon: 'log' },
-] as const
 
 const cameras = ref<Camera[]>([])
 const defaultPipelineFrameIntervalSeconds = 0.5
@@ -816,14 +807,7 @@ onBeforeUnmount(() => {
   <div class="app-layout">
     <aside class="app-sidebar">
       <div class="app-brand">NVR</div>
-      <nav class="primary-nav" aria-label="Primary navigation">
-        <RouterLink v-for="item in primaryNavItems" :key="item.to" :to="item.to">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="iconPaths[item.icon]" />
-          </svg>
-          <span>{{ item.label }}</span>
-        </RouterLink>
-      </nav>
+      <MainNavBar />
     </aside>
 
     <main class="app-content">
@@ -958,9 +942,9 @@ onBeforeUnmount(() => {
                 :disabled="!canEditPipelines"
                 @click="addPipelineFromTree"
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="iconPaths.plus" />
-                </svg>
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.plus }}
+                </span>
               </button>
             </header>
             <div class="tree">
@@ -977,9 +961,9 @@ onBeforeUnmount(() => {
                   @dblclick="openPipelineDebug(pipeline.id)"
                 >
                   <span class="tree-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="iconPaths.pipeline" />
-                    </svg>
+                    <span class="material-symbols-outlined" aria-hidden="true">
+                      {{ materialIcons.pipeline }}
+                    </span>
                   </span>
                   <span class="tree-label">{{ pipeline.name || pipeline.id }}</span>
                   <button
@@ -987,18 +971,18 @@ onBeforeUnmount(() => {
                     :disabled="!canEditPipelines"
                     @click.stop="addStageToPipeline(pipeline.id)"
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="iconPaths.plus" />
-                    </svg>
+                    <span class="material-symbols-outlined" aria-hidden="true">
+                      {{ materialIcons.plus }}
+                    </span>
                   </button>
                   <button
                     title="Remove pipeline"
                     :disabled="!canEditPipelines"
                     @click.stop="deletePipeline(pipeline.id)"
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="iconPaths.trash" />
-                    </svg>
+                    <span class="material-symbols-outlined" aria-hidden="true">
+                      {{ materialIcons.trash }}
+                    </span>
                   </button>
                 </div>
                 <div class="tree-children">
@@ -1013,17 +997,15 @@ onBeforeUnmount(() => {
                     @dblclick="openStageDebug(pipeline.id, stage.id)"
                   >
                     <span class="tree-icon">
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path
-                          :d="
-                            stage.pipeline
-                              ? iconPaths.link
-                              : stage.filename
-                                ? iconPaths.file
-                                : iconPaths.stage
-                          "
-                        />
-                      </svg>
+                      <span class="material-symbols-outlined" aria-hidden="true">
+                        {{
+                          stage.pipeline
+                            ? materialIcons.link
+                            : stage.filename
+                              ? materialIcons.file
+                              : materialIcons.stage
+                        }}
+                      </span>
                     </span>
                     <span class="tree-label">{{ stage.id }}</span>
                     <button
@@ -1031,9 +1013,9 @@ onBeforeUnmount(() => {
                       :disabled="!canEditPipelines"
                       @click.stop="deleteStage(pipeline.id, stage.id)"
                     >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path :d="iconPaths.trash" />
-                      </svg>
+                      <span class="material-symbols-outlined" aria-hidden="true">
+                        {{ materialIcons.trash }}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1396,7 +1378,7 @@ button:disabled {
   opacity: 0.55;
 }
 
-button:disabled svg {
+button:disabled .material-symbols-outlined {
   opacity: 0.75;
 }
 
@@ -1422,40 +1404,6 @@ button:disabled svg {
 .app-brand {
   font-size: 18px;
   font-weight: 700;
-}
-
-.primary-nav {
-  display: grid;
-  gap: 6px;
-}
-
-.primary-nav a {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: #cbd5df;
-  text-decoration: none;
-  font-size: 14px;
-}
-
-.primary-nav a:hover,
-.primary-nav a.router-link-active {
-  background: #223044;
-  color: #ffffff;
-}
-
-.primary-nav svg {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .app-content {
@@ -1600,15 +1548,18 @@ button:disabled svg {
   cursor: pointer;
 }
 
-.tree-panel svg,
-.tree-row svg {
+.tree-panel .material-symbols-outlined,
+.tree-row .material-symbols-outlined {
   width: 16px;
+  overflow: hidden;
   height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  font-size: 16px;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 20;
+  line-height: 1;
 }
 
 .tree {
@@ -2120,14 +2071,6 @@ button:disabled svg {
   .app-sidebar {
     position: static;
     height: auto;
-  }
-
-  .primary-nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .primary-nav a {
-    justify-content: center;
   }
 
   .vscode-header {
