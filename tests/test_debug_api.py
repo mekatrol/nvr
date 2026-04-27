@@ -417,6 +417,20 @@ class DebugApiTest(unittest.TestCase):
                 str(stage_path.resolve()),
                 graph.pipeline_by_id()["resize-pipeline"].stages[0].filename,
             )
+            selected_response = store.pipeline_config_response(
+                "preprocessors/resize-pipeline.yaml"
+            )
+            selected_session = DebugApiState(config, FakeFrameSource).load_camera_frame(
+                "driveway", "preprocessors/resize-pipeline.yaml"
+            )
+            selected_records = selected_session.run()
+
+            self.assertEqual(
+                ["resize-pipeline"],
+                [pipeline["id"] for pipeline in selected_response["pipelines"]],
+            )
+            self.assertEqual("resize-pipeline", selected_records[0].pipeline_id)
+            self.assertEqual("resize-frame", selected_records[0].stage_id)
 
             deployed = store.deploy_pipeline_config_pipelines()
             deployed_root = yaml.safe_load(store.deployed_path.read_text())

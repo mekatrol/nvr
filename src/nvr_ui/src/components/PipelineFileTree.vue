@@ -11,17 +11,36 @@ defineProps<{
   depth?: number
 }>()
 
+const emit = defineEmits<{
+  openYaml: [path: string]
+}>()
+
 function fileIcon(node: PipelineFileTreeNode) {
   if (node.type === 'directory') return 'folder'
   if (node.name.endsWith('.py')) return 'code'
   return 'description'
+}
+
+function isYamlFile(node: PipelineFileTreeNode) {
+  return node.type === 'file' && /\.(ya?ml)$/i.test(node.name)
+}
+
+function openNode(node: PipelineFileTreeNode) {
+  if (isYamlFile(node)) {
+    emit('openYaml', node.path)
+  }
 }
 </script>
 
 <template>
   <div class="pipeline-file-tree" :style="{ '--depth': depth ?? 0 }">
     <div v-for="node in nodes" :key="node.path" class="pipeline-file-node">
-      <div class="pipeline-file-row" :title="node.path">
+      <div
+        class="pipeline-file-row"
+        :class="{ selectable: isYamlFile(node) }"
+        :title="node.path"
+        @dblclick="openNode(node)"
+      >
         <span class="material-symbols-outlined" aria-hidden="true">
           {{ fileIcon(node) }}
         </span>
@@ -31,6 +50,7 @@ function fileIcon(node: PipelineFileTreeNode) {
         v-if="node.children.length > 0"
         :nodes="node.children"
         :depth="(depth ?? 0) + 1"
+        @open-yaml="emit('openYaml', $event)"
       />
     </div>
   </div>
@@ -61,6 +81,10 @@ function fileIcon(node: PipelineFileTreeNode) {
 
 .pipeline-file-row:hover {
   background: #26364a;
+}
+
+.pipeline-file-row.selectable {
+  cursor: pointer;
 }
 
 .material-symbols-outlined {

@@ -74,6 +74,7 @@ type PipelinesResponse = {
   enabled: boolean
   integrity?: PipelineIntegrity
   frame_interval_seconds: number | string | null
+  selected_pipeline_config_path?: string
   pipeline_file_tree?: PipelineFileTreeNode[]
   pipelines: Pipeline[]
   edges: Edge[]
@@ -120,6 +121,7 @@ const pipelineConfigFrameIntervalSeconds = ref(String(defaultPipelineFrameInterv
 const pipelineConfigPipelines = ref<Pipeline[]>([])
 const pipelineConfigEdges = ref<Edge[]>([])
 const pipelineFileTree = ref<PipelineFileTreeNode[]>([])
+const selectedPipelineConfigPath = ref('')
 const pipelineIntegrity = ref<PipelineIntegrity>({ ok: true, issues: [] })
 const currentView = ref<'index' | 'debug'>('index')
 const debugPipelineId = ref('')
@@ -228,11 +230,14 @@ async function loadCameras() {
 
 async function loadPipelines() {
   if (!selectedCameraId.value) return
+  const pathQuery = pipelineConfigPathQuery()
   const graph = await getJson<{
     pipelines: Pipeline[]
     edges: Edge[]
     integrity?: PipelineIntegrity
-  }>(`/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}`)
+  }>(
+    `/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`,
+  )
   applyPipelineGraph(graph)
 }
 
@@ -265,12 +270,11 @@ async function loadPipelineConfigPipelines() {
 
 async function reloadPipelines() {
   await stopRunLoop(false)
-  const graph = await postJson<{
-    pipelines: Pipeline[]
-    edges: Edge[]
-    integrity?: PipelineIntegrity
-  }>('/api/pipelines/reload', {})
-  applyPipelineGraph(graph)
+  await postJson<{ pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }>(
+    '/api/pipelines/reload',
+    {},
+  )
+  await loadPipelines()
   await loadPipelineConfigPipelines()
   await loadDebugState()
   deployStatus.value = 'Pipelines reloaded'
@@ -278,11 +282,12 @@ async function reloadPipelines() {
 
 async function loadDebugState() {
   if (!selectedCameraId.value) return
+  const pathQuery = pipelineConfigPathQuery()
   debugState.value = await getJson<DebugState>(
-    `/api/debug/state?camera_id=${encodeURIComponent(selectedCameraId.value)}`,
+    `/api/debug/state?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`,
   )
   const payload = await getJson<{ metadata: Record<string, unknown> }>(
-    `/api/debug/metadata?camera_id=${encodeURIComponent(selectedCameraId.value)}`,
+    `/api/debug/metadata?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`,
   )
   metadata.value = payload.metadata
 }
@@ -306,6 +311,7 @@ async function runCommand(command: string) {
   if (!selectedCameraId.value) return
   debugState.value = await postJson<DebugState>('/api/debug/command', {
     camera_id: selectedCameraId.value,
+    pipeline_config_path: selectedPipelineConfigPath.value,
     command,
   })
   await loadDebugState()
@@ -371,6 +377,7 @@ async function toggleBreakpoint(enabled: boolean) {
     const [pipelineId, stageId] = selectedBreakpoint.value.split(':')
     debugState.value = await postJson<DebugState>('/api/debug/breakpoints', {
       camera_id: selectedCameraId.value,
+      pipeline_config_path: selectedPipelineConfigPath.value,
       pipeline_id: pipelineId,
       stage_id: stageId || null,
       enabled,
@@ -383,6 +390,7 @@ async function toggleBreakpoint(enabled: boolean) {
 async function refreshCamera() {
   await stopRunLoop(false)
   try {
+    selectedPipelineConfigPath.value = ''
     showPipelineIndex()
     await loadPipelines()
     await loadDebugState()
@@ -734,6 +742,24 @@ function showPipelineIndex() {
   debugPipelineId.value = ''
 }
 
+async function openPipelineConfigFile(path: string) {
+  if (!isYamlPath(path)) return
+  await stopRunLoop(false)
+  selectedPipelineConfigPath.value = path === 'pipelines.yaml' ? '' : path
+  showPipelineIndex()
+  await loadPipelines()
+  await loadDebugState()
+}
+
+function pipelineConfigPathQuery() {
+  if (!selectedPipelineConfigPath.value) return ''
+  return `&pipeline_config_path=${encodeURIComponent(selectedPipelineConfigPath.value)}`
+}
+
+function isYamlPath(path: string) {
+  return /\.(ya?ml)$/i.test(path)
+}
+
 function startLogRefresh() {
   if (logRefreshTimer.value) return
   loadLogs().catch(() => undefined)
@@ -976,7 +1002,11 @@ onBeforeUnmount(() => {
               >
                 No pipelines
               </div>
-              <PipelineFileTree v-if="pipelineFileTree.length > 0" :nodes="pipelineFileTree" />
+              <PipelineFileTree
+                v-if="pipelineFileTree.length > 0"
+                :nodes="pipelineFileTree"
+                @open-yaml="openPipelineConfigFile"
+              />
               <div
                 v-for="pipeline in pipelineConfigPipelines"
                 :key="pipeline.id"

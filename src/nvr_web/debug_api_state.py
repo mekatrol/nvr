@@ -23,7 +23,7 @@ class DebugApiState:
         self.config = config or Config()
         self.frame_source_factory = frame_source_factory or OpenCvFrameSource
         self.logger = logger
-        self.sessions: dict[str, PipelineDebugSession] = {}
+        self.sessions: dict[tuple[str, str], PipelineDebugSession] = {}
         self.frame_sources: dict[str, Any] = {}
         self.pipelines_store = PipelinesStore(self.config, logger=self.logger)
 
@@ -42,9 +42,11 @@ class DebugApiState:
                 )
         return cameras
 
-    def pipelines(self, camera_id: str | None = None) -> dict[str, Any]:
-        integrity = self.pipelines_store.pipeline_integrity()
-        graph = self.pipelines_store.pipeline_config_graph()
+    def pipelines(
+        self, camera_id: str | None = None, pipeline_config_path: str | None = None
+    ) -> dict[str, Any]:
+        integrity = self.pipelines_store.pipeline_integrity(pipeline_config_path)
+        graph = self.pipelines_store.pipeline_config_graph(pipeline_config_path)
         if graph is None:
             return {
                 "enabled": False,
@@ -58,6 +60,7 @@ class DebugApiState:
             "pipelines": [
                 {
                     "id": pipeline.id,
+                    "name": getattr(pipeline, "name", pipeline.id),
                     "enabled": pipeline.enabled,
                     "required_inputs": pipeline.required_inputs,
                     "stages": [
@@ -66,6 +69,8 @@ class DebugApiState:
                             "enabled": stage.enabled,
                             "module": stage.module,
                             "class_name": stage.class_name,
+                            "filename": stage.filename,
+                            "pipeline": stage.pipeline,
                             "config": stage.config,
                         }
                         for stage in pipeline.stages
@@ -76,26 +81,31 @@ class DebugApiState:
             "edges": [{"from": edge.source, "to": edge.target} for edge in graph.edges],
         }
 
-    def session(self, camera_id: str) -> PipelineDebugSession | None:
-        integrity = self.pipelines_store.pipeline_integrity()
+    def session(
+        self, camera_id: str, pipeline_config_path: str | None = None
+    ) -> PipelineDebugSession | None:
+        session_key = self._session_key(camera_id, pipeline_config_path)
+        integrity = self.pipelines_store.pipeline_integrity(pipeline_config_path)
         if not integrity.get("ok", False):
-            self.sessions.pop(camera_id, None)
+            self.sessions.pop(session_key, None)
             if self.logger is not None:
                 self.logger.warning(
                     "Pipeline debug session blocked because integrity check failed"
                 )
             return None
-        if camera_id in self.sessions:
-            return self.sessions[camera_id]
-        graph = self.pipelines_store.pipeline_config_graph()
+        if session_key in self.sessions:
+            return self.sessions[session_key]
+        graph = self.pipelines_store.pipeline_config_graph(pipeline_config_path)
         if graph is None:
             return None
         session = PipelineDebugSession(graph)
-        self.sessions[camera_id] = session
+        self.sessions[session_key] = session
         return session
 
-    def pipeline_config_pipelines(self) -> dict[str, Any]:
-        return self.pipelines_store.pipeline_config_response()
+    def pipeline_config_pipelines(
+        self, pipeline_config_path: str | None = None
+    ) -> dict[str, Any]:
+        return self.pipelines_store.pipeline_config_response(pipeline_config_path)
 
     def reload_pipelines(self) -> dict[str, Any]:
         self.pipelines_store = PipelinesStore(self.config, logger=self.logger)
@@ -131,8 +141,10 @@ class DebugApiState:
         self.sessions.clear()
         self.close_frame_sources()
 
-    def load_camera_frame(self, camera_id: str) -> PipelineDebugSession | None:
-        session = self.session(camera_id)
+    def load_camera_frame(
+        self, camera_id: str, pipeline_config_path: str | None = None
+    ) -> PipelineDebugSession | None:
+        session = self.session(camera_id, pipeline_config_path)
         if session is None:
             return None
 
@@ -191,3 +203,9 @@ class DebugApiState:
     def _log_bad_frame(self, camera_id: str, reason: str) -> None:
         if self.logger is not None:
             self.logger.warning("[%s] Dropping bad pipeline frame: %s", camera_id, reason)
+
+    @staticmethod
+    def _session_key(
+        camera_id: str, pipeline_config_path: str | None = None
+    ) -> tuple[str, str]:
+        return (camera_id, pipeline_config_path or "")

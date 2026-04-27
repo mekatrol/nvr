@@ -31,19 +31,29 @@ class PipelinesStore:
         self.pipelines_dir.mkdir(parents=True, exist_ok=True)
         self.deployed_dir.mkdir(parents=True, exist_ok=True)
 
-    def pipeline_config_response(self) -> dict[str, Any]:
-        pipelines_config = self.load_pipeline_config_pipelines()
-        return self.pipelines_response(pipelines_config)
+    def pipeline_config_response(self, filename: str | None = None) -> dict[str, Any]:
+        if filename:
+            yaml_path = self.pipeline_config_file_path(filename)
+            pipelines_config = self.load_pipeline_config_file_pipelines(yaml_path)
+            return self.pipelines_response(pipelines_config, yaml_path, expand_paths=True)
 
-    def pipeline_integrity(self) -> dict[str, Any]:
         pipelines_config = self.load_pipeline_config_pipelines()
+        return self.pipelines_response(pipelines_config, self.pipelines_path)
+
+    def pipeline_integrity(self, filename: str | None = None) -> dict[str, Any]:
+        yaml_path = self.pipeline_config_file_path(filename) if filename else self.pipelines_path
+        pipelines_config = (
+            self.load_pipeline_config_file_pipelines(yaml_path)
+            if filename
+            else self.load_pipeline_config_pipelines()
+        )
         if pipelines_config.get(Config.KEY_PIPELINES_ENABLED) is False:
             return {"ok": True, "issues": []}
 
         try:
             graph_config = self._expand_pipeline_config_paths(
                 pipelines_config,
-                self.pipelines_path,
+                yaml_path,
                 self.pipelines_dir,
                 resolve_stage_filenames=True,
             )
@@ -74,15 +84,20 @@ class PipelinesStore:
 
         return {"ok": not issues, "issues": issues}
 
-    def pipeline_config_graph(self) -> PipelineGraph | None:
-        pipelines_config = self.load_pipeline_config_pipelines()
+    def pipeline_config_graph(self, filename: str | None = None) -> PipelineGraph | None:
+        yaml_path = self.pipeline_config_file_path(filename) if filename else self.pipelines_path
+        pipelines_config = (
+            self.load_pipeline_config_file_pipelines(yaml_path)
+            if filename
+            else self.load_pipeline_config_pipelines()
+        )
         if pipelines_config.get(Config.KEY_PIPELINES_ENABLED) is False:
             self._log_info("Pipeline config parsing skipped because pipelines are disabled")
             return None
-        self._log_info("Parsing pipeline config from %s", self.pipelines_path)
+        self._log_info("Parsing pipeline config from %s", yaml_path)
         graph_config = self._expand_pipeline_config_paths(
             pipelines_config,
-            self.pipelines_path,
+            yaml_path,
             self.pipelines_dir,
             resolve_stage_filenames=True,
         )
@@ -103,7 +118,7 @@ class PipelinesStore:
         pipelines_config = self.config.get_pipelines_config()
         if not pipelines_config:
             return {"enabled": False, "pipelines": [], "edges": []}
-        return self.pipelines_response(pipelines_config)
+        return self.pipelines_response(pipelines_config, self.deployed_path, self.deployed_dir)
 
     def load_pipeline_config_pipelines(self) -> dict[str, Any]:
         if self.pipelines_path.exists():
@@ -119,6 +134,14 @@ class PipelinesStore:
                 Config.KEY_PIPELINE_EDGES: [],
             }
 
+        return self._normalize_pipelines_config(pipelines_config)
+
+    def pipeline_config_file_path(self, filename: str) -> Path:
+        return self._config_path_under(filename, self.pipelines_path, self.pipelines_dir)
+
+    def load_pipeline_config_file_pipelines(self, yaml_path: Path) -> dict[str, Any]:
+        data = self._load_yaml(yaml_path)
+        pipelines_config = Config._unwrap_pipelines_config(data)
         return self._normalize_pipelines_config(pipelines_config)
 
     def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
@@ -175,15 +198,38 @@ class PipelinesStore:
         self._log_info("Example resize pipeline generated at %s", self.pipelines_path)
         return self.pipelines_response(pipelines_config)
 
-    def pipelines_response(self, pipelines_config: dict[str, Any]) -> dict[str, Any]:
+    def pipelines_response(
+        self,
+        pipelines_config: dict[str, Any],
+        yaml_path: Path | None = None,
+        allowed_root: Path | None = None,
+        expand_paths: bool = False,
+    ) -> dict[str, Any]:
         pipelines_config = self._normalize_pipelines_config(pipelines_config)
-        graph = Config._parse_pipelines(pipelines_config)
+        yaml_path = yaml_path or self.pipelines_path
+        allowed_root = allowed_root or self.pipelines_dir
+        graph_config = (
+            self._expand_pipeline_config_paths(
+                pipelines_config,
+                yaml_path,
+                allowed_root,
+                resolve_stage_filenames=True,
+            )
+            if expand_paths
+            else pipelines_config
+        )
+        graph = Config._parse_pipelines(graph_config)
         self._log_info(
             "Parsed pipeline response: %s pipelines, %s edges",
             len(graph.pipelines),
             len(graph.edges),
         )
-        integrity = self.pipeline_integrity()
+        integrity = self.pipeline_integrity(
+            None
+            if yaml_path.resolve() == self.pipelines_path.resolve()
+            or allowed_root.resolve() != self.pipelines_dir.resolve()
+            else self._relative_path(yaml_path, self.pipelines_path)
+        )
         return {
             "enabled": pipelines_config.get(Config.KEY_PIPELINES_ENABLED, True),
             "integrity": integrity,
@@ -194,6 +240,9 @@ class PipelinesStore:
             "deployed_path": str(self.deployed_path),
             "pipeline_conf_path": str(self.pipeline_conf_path),
             "config_path": str(self.config_path),
+            "selected_pipeline_config_path": self._relative_path(
+                yaml_path, self.pipelines_path
+            ),
             "pipeline_file_tree": self.pipeline_file_tree(),
             "pipelines_config": pipelines_config,
             "pipelines": [
