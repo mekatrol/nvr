@@ -5,6 +5,8 @@ from typing import Any
 
 from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
 from nvr_common.config import Config
+from nvr_common.logging.log_reader import LogReader
+from nvr_common.logging.logger import Logger
 from nvr_common.logging.rtsp_sanitizing_filter import sanitize_rtsp_url
 from nvr_common.pipeline.frame_validation import bad_frame_reason
 from nvr_common.pipeline.debug import PipelineDebugSession
@@ -23,7 +25,7 @@ class DebugApiState:
         self.logger = logger
         self.sessions: dict[str, PipelineDebugSession] = {}
         self.frame_sources: dict[str, Any] = {}
-        self.pipelines_store = PipelinesStore(self.config)
+        self.pipelines_store = PipelinesStore(self.config, logger=self.logger)
 
     def list_cameras(self) -> list[dict[str, Any]]:
         cameras = []
@@ -80,6 +82,13 @@ class DebugApiState:
     def pipeline_config_pipelines(self) -> dict[str, Any]:
         return self.pipelines_store.pipeline_config_response()
 
+    def log_entries(self, limit: int = 500) -> list[dict[str, Any]]:
+        return LogReader(Logger().log_file_path).entries(limit)
+
+    def clear_logs(self) -> None:
+        LogReader(Logger().log_file_path).clear()
+        Logger().logger.debug("Logs cleared")
+
     def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
         response = self.pipelines_store.save_pipeline_config_pipelines(raw_pipelines)
         self.sessions.clear()
@@ -97,7 +106,7 @@ class DebugApiState:
 
     def reload_config(self) -> None:
         self.config = Config()
-        self.pipelines_store = PipelinesStore(self.config)
+        self.pipelines_store = PipelinesStore(self.config, logger=self.logger)
         self.sessions.clear()
         self.close_frame_sources()
 

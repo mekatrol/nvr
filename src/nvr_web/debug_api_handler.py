@@ -31,6 +31,10 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/pipeline_config/pipelines":
             self._json(api_state.pipeline_config_pipelines())
             return
+        if parsed.path == "/api/logs":
+            limit = self._query_int(query, "limit", 500)
+            self._json({"entries": api_state.log_entries(limit)})
+            return
         if parsed.path == "/api/debug/state":
             camera_id = self._query_value(query, "camera_id")
             self._json(self._session_snapshot(camera_id))
@@ -44,6 +48,9 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/debug/preview":
             self._json({"preview": None})
             return
+
+        if not Path(parsed.path).suffix:
+            self.path = "/index.html"
 
         super().do_GET()
 
@@ -74,6 +81,11 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 self._json(api_state.generate_example_resize_pipeline())
             except ValueError as ex:
                 self._json({"error": str(ex)}, status=400)
+            return
+
+        if parsed.path == "/api/logs/clear":
+            api_state.clear_logs()
+            self._json({"entries": []})
             return
 
         if parsed.path == "/api/debug/breakpoints":
@@ -167,6 +179,16 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
     def _query_value(query: dict[str, list[str]], key: str) -> str | None:
         values = query.get(key)
         return values[0] if values else None
+
+    @staticmethod
+    def _query_int(query: dict[str, list[str]], key: str, default: int) -> int:
+        values = query.get(key)
+        if not values:
+            return default
+        try:
+            return max(1, min(int(values[0]), 2000))
+        except ValueError:
+            return default
 
     @staticmethod
     def _no_deployed_pipeline_error() -> str:

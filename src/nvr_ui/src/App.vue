@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 type Camera = {
@@ -58,6 +58,16 @@ type PipelinesResponse = {
   edges: Edge[]
 }
 
+type LogEntry = {
+  timestamp: string
+  level: string
+  description: string
+}
+
+type LogSeverity = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+
+const logSeverityOptions: LogSeverity[] = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+
 const iconPaths = {
   pipeline: 'M3 5.5A2.5 2.5 0 0 1 5.5 3H9l2 2h7.5A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z',
   stage: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5',
@@ -95,6 +105,10 @@ const selectedStagePipeline = ref('')
 const selectedStageConfigJson = ref('{}')
 const selectedPipelineRequiredInputs = ref('')
 const deployStatus = ref('')
+const logEntries = ref<LogEntry[]>([])
+const selectedLogSeverities = ref<LogSeverity[]>([...logSeverityOptions])
+const isLoadingLogs = ref(false)
+const logRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const route = useRoute()
 const vscodeLoadFailed = ref(false)
 const runLoopTimer = ref<ReturnType<typeof setInterval> | null>(null)
@@ -107,12 +121,18 @@ const vscodeWebUrl = computed(
     'http://127.0.0.1:8000/?folder=/home/dad/nvr/pipeline_config/pipelines',
 )
 const isEditorRoute = computed(() => route.path === '/editor')
+const isLogRoute = computed(() => route.path === '/log')
 
 const selectedCamera = computed(() =>
   cameras.value.find((camera) => camera.id === selectedCameraId.value),
 )
 
 const latestRecord = computed(() => debugState.value.records?.at(-1))
+
+const filteredLogEntries = computed(() => {
+  const selectedLevels = new Set(selectedLogSeverities.value)
+  return logEntries.value.filter((entry) => selectedLevels.has(entry.level as LogSeverity))
+})
 
 const visiblePipelines = computed(() => {
   if (!debugPipelineId.value) return pipelines.value
@@ -197,6 +217,21 @@ async function loadDebugState() {
     `/api/debug/metadata?camera_id=${encodeURIComponent(selectedCameraId.value)}`,
   )
   metadata.value = payload.metadata
+}
+
+async function loadLogs() {
+  isLoadingLogs.value = true
+  try {
+    const payload = await getJson<{ entries: LogEntry[] }>('/api/logs?limit=500')
+    logEntries.value = payload.entries
+  } finally {
+    isLoadingLogs.value = false
+  }
+}
+
+async function clearLogs() {
+  const payload = await postJson<{ entries: LogEntry[] }>('/api/logs/clear', {})
+  logEntries.value = payload.entries
 }
 
 async function runCommand(command: string) {
@@ -616,6 +651,20 @@ function showPipelineIndex() {
   debugPipelineId.value = ''
 }
 
+function startLogRefresh() {
+  if (logRefreshTimer.value) return
+  loadLogs().catch(() => undefined)
+  logRefreshTimer.value = setInterval(() => {
+    loadLogs().catch(() => undefined)
+  }, 3000)
+}
+
+function stopLogRefresh() {
+  if (!logRefreshTimer.value) return
+  clearInterval(logRefreshTimer.value)
+  logRefreshTimer.value = null
+}
+
 function validatePipelinesPipelineReferences() {
   const pipelineIds = new Set(pipelineConfigPipelines.value.map((pipeline) => pipeline.id))
   const downstream = new Map<string, string[]>()
@@ -668,13 +717,28 @@ function uniqueId(prefix: string, existingIds: string[]) {
 
 onMounted(() => {
   showPipelineIndex()
+  if (isLogRoute.value) {
+    startLogRefresh()
+  }
   loadCameras()
     .then(refreshCamera)
     .catch(() => undefined)
 })
 
+watch(
+  () => route.path,
+  (path) => {
+    if (path === '/log') {
+      startLogRefresh()
+    } else {
+      stopLogRefresh()
+    }
+  },
+)
+
 onBeforeUnmount(() => {
   stopRunLoop(false)
+  stopLogRefresh()
 })
 </script>
 
@@ -689,6 +753,7 @@ onBeforeUnmount(() => {
         <button :disabled="!canEditPipelines" @click="withAction('example_resize', generateExampleResizePipeline)">Example Resize</button>
         <button :disabled="!canEditPipelines" @click="withAction('deploy_pipelines', deployPipelinesFromEditor)">Deploy Pipelines</button>
         <RouterLink to="/">Debugger</RouterLink>
+        <RouterLink to="/log">Log</RouterLink>
         <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
       </nav>
     </header>
@@ -710,12 +775,54 @@ onBeforeUnmount(() => {
     </section>
   </main>
 
+  <main v-else-if="isLogRoute" class="log-shell">
+    <header class="vscode-header">
+      <div>
+        <strong>NVR Log</strong>
+        <span>{{ filteredLogEntries.length }} / {{ logEntries.length }} entries shown</span>
+      </div>
+      <nav>
+        <fieldset class="log-filter">
+          <legend>Severity</legend>
+          <label v-for="level in logSeverityOptions" :key="level">
+            <input v-model="selectedLogSeverities" type="checkbox" :value="level" />
+            <span>{{ level }}</span>
+          </label>
+        </fieldset>
+        <button :disabled="isLoadingLogs" @click="loadLogs">Refresh</button>
+        <button :disabled="isLoadingLogs || logEntries.length === 0" @click="clearLogs">Clear</button>
+        <RouterLink to="/">Debugger</RouterLink>
+        <RouterLink to="/editor">Editor</RouterLink>
+      </nav>
+    </header>
+
+    <section class="log-workspace">
+      <p v-if="apiError" class="log-error">{{ apiError }}</p>
+      <div class="log-table" role="table" aria-label="NVR log entries">
+        <div class="log-row log-heading" role="row">
+          <span role="columnheader">Date/time</span>
+          <span role="columnheader">Log level</span>
+          <span role="columnheader">Log description</span>
+        </div>
+        <div v-if="filteredLogEntries.length === 0" class="log-empty">No log entries</div>
+        <div v-for="(entry, index) in filteredLogEntries" :key="`${entry.timestamp}-${index}`" class="log-row" role="row">
+          <span class="log-time" role="cell">{{ entry.timestamp }}</span>
+          <span class="log-level" :class="`level-${entry.level.toLowerCase()}`" role="cell">
+            {{ entry.level }}
+          </span>
+          <span class="log-description" role="cell">{{ entry.description }}</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
   <main v-else class="shell">
     <aside class="sidebar">
       <div class="brand">NVR Debugger</div>
       <nav class="sidebar-nav">
         <RouterLink to="/">Debugger</RouterLink>
         <RouterLink to="/editor">Editor</RouterLink>
+        <RouterLink to="/log">Log</RouterLink>
       </nav>
       <label class="field">
         <span>Camera</span>
@@ -1581,6 +1688,123 @@ button:disabled svg {
 
 .vscode-error span {
   font-size: 13px;
+}
+
+.log-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+  background: #f4f6f8;
+}
+
+.log-workspace {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  padding: 18px;
+}
+
+.log-error {
+  margin: 0;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.log-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  color: #cbd5df;
+  font-size: 13px;
+}
+
+.log-filter legend {
+  padding: 0;
+  color: #cbd5df;
+}
+
+.log-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.log-table {
+  display: grid;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 180px 110px minmax(360px, 1fr);
+  min-width: 720px;
+  border-bottom: 1px solid #e5eaf0;
+}
+
+.log-row:last-child {
+  border-bottom: 0;
+}
+
+.log-row span {
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.log-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef2f6;
+  color: #394b5f;
+  font-weight: 700;
+}
+
+.log-time,
+.log-level {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+}
+
+.log-level {
+  font-weight: 700;
+}
+
+.level-error,
+.level-critical {
+  color: #b91c1c;
+}
+
+.level-warning {
+  color: #a16207;
+}
+
+.level-info {
+  color: #1d4ed8;
+}
+
+.log-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.log-empty {
+  padding: 18px;
+  color: #627386;
+  font-size: 14px;
 }
 
 @media (max-width: 820px) {

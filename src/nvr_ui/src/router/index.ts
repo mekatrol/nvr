@@ -13,6 +13,11 @@ const router = createRouter({
       name: 'editor',
       component: { template: '<div />' },
     },
+    {
+      path: '/log',
+      name: 'log',
+      component: { template: '<div />' },
+    },
   ],
 })
 

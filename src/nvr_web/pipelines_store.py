@@ -17,8 +17,9 @@ class PipelinesStore:
     EXAMPLE_RESIZE_STAGE_FILENAME = "example_resize_stage.py"
     DEFAULT_FRAME_INTERVAL_SECONDS = 0.5
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, logger: Any = None) -> None:
         self.config = config
+        self.logger = logger
         self.config_path = Path(config.config_path)
         self.storage_path = config.get_pipeline_config_storage_path()
         self.pipelines_dir = self.storage_path / "pipelines"
@@ -36,15 +37,26 @@ class PipelinesStore:
     def pipeline_config_graph(self) -> PipelineGraph | None:
         pipelines_config = self.load_pipeline_config_pipelines()
         if pipelines_config.get(Config.KEY_PIPELINES_ENABLED) is False:
+            self._log_info("Pipeline config parsing skipped because pipelines are disabled")
             return None
+        self._log_info("Parsing pipeline config from %s", self.pipelines_path)
         graph_config = self._expand_pipeline_config_paths(
             pipelines_config,
             self.pipelines_path,
             self.pipelines_dir,
             resolve_stage_filenames=True,
         )
-        graph = Config._parse_pipelines(graph_config)
-        graph.validate()
+        try:
+            graph = Config._parse_pipelines(graph_config)
+            graph.validate()
+        except Exception as ex:
+            self._log_error("Pipeline config parse failed: %s", ex)
+            raise
+        self._log_info(
+            "Parsed pipeline config: %s pipelines, %s edges",
+            len(graph.pipelines),
+            len(graph.edges),
+        )
         return graph
 
     def deployed_response(self) -> dict[str, Any]:
@@ -70,6 +82,7 @@ class PipelinesStore:
         return self._normalize_pipelines_config(pipelines_config)
 
     def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
+        self._log_info("Saving pipeline config to %s", self.pipelines_path)
         pipelines_config = self._normalize_pipelines_config(raw_pipelines)
         pipelines_config = self._relativize_stage_filenames(
             pipelines_config, self.pipelines_path, self.pipelines_dir
@@ -78,9 +91,11 @@ class PipelinesStore:
             pipelines_config, self.pipelines_path, self.pipelines_dir
         )
         self._write_yaml(self.pipelines_path, pipelines_config)
+        self._log_info("Pipeline config saved to %s", self.pipelines_path)
         return self.pipelines_response(pipelines_config)
 
     def deploy_pipeline_config_pipelines(self) -> dict[str, Any]:
+        self._log_info("Deploying pipeline config to %s", self.deployed_path)
         pipelines_config = self.load_pipeline_config_pipelines()
         self._validate_pipelines_config(
             pipelines_config, self.pipelines_path, self.pipelines_dir
@@ -90,9 +105,11 @@ class PipelinesStore:
             deployed_config, self.deployed_path, self.deployed_dir
         )
         self._write_yaml(self.deployed_path, deployed_config)
+        self._log_info("Pipeline config deployed to %s", self.deployed_path)
         return self.pipelines_response(deployed_config)
 
     def generate_example_resize_pipeline(self) -> dict[str, Any]:
+        self._log_info("Generating example resize pipeline in %s", self.pipelines_dir)
         stage_path = self.pipelines_dir / self.EXAMPLE_RESIZE_STAGE_FILENAME
         stage_path.write_text(self._example_resize_stage_source(), encoding="utf-8")
 
@@ -115,11 +132,17 @@ class PipelinesStore:
             pipelines_config, self.pipelines_path, self.pipelines_dir
         )
         self._write_yaml(self.pipelines_path, pipelines_config)
+        self._log_info("Example resize pipeline generated at %s", self.pipelines_path)
         return self.pipelines_response(pipelines_config)
 
     def pipelines_response(self, pipelines_config: dict[str, Any]) -> dict[str, Any]:
         pipelines_config = self._normalize_pipelines_config(pipelines_config)
         graph = Config._parse_pipelines(pipelines_config)
+        self._log_info(
+            "Parsed pipeline response: %s pipelines, %s edges",
+            len(graph.pipelines),
+            len(graph.edges),
+        )
         return {
             "enabled": pipelines_config.get(Config.KEY_PIPELINES_ENABLED, True),
             "frame_interval_seconds": pipelines_config.get(
@@ -174,10 +197,19 @@ class PipelinesStore:
                 errors.append(str(ex))
         self.config._validate_pipelines(validation_config, "pipelines", errors)
         if errors:
+            self._log_error("Pipeline config validation failed: %s", "; ".join(errors))
             raise ValueError("Invalid pipelines:\n- " + "\n- ".join(errors))
         graph = Config._parse_pipelines(validation_config)
         graph.validate()
         return graph
+
+    def _log_info(self, msg: str, *args: Any) -> None:
+        if self.logger is not None:
+            self.logger.info(msg, *args)
+
+    def _log_error(self, msg: str, *args: Any) -> None:
+        if self.logger is not None:
+            self.logger.error(msg, *args)
 
     @staticmethod
     def _normalize_pipelines_config(raw_pipelines: dict[str, Any]) -> dict[str, Any]:

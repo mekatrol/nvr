@@ -56,7 +56,7 @@ class Logger(Singleton):
         self._logger = logging.getLogger("nvr")
 
         # Set a default log level; adjust as needed or make configurable.
-        self._logger.setLevel(logging.INFO)
+        self._logger.setLevel(logging.DEBUG)
 
         # Avoid adding handlers multiple times if __init__ somehow runs again.
         if not self._logger.handlers:
