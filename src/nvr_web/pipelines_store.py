@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import tempfile
 from copy import deepcopy
+from os.path import relpath
 from pathlib import Path
 from shutil import copy2
+import tempfile
 from typing import Any
 
 import yaml
@@ -36,7 +37,13 @@ class PipelinesStore:
         pipelines_config = self.load_pipeline_config_pipelines()
         if pipelines_config.get(Config.KEY_PIPELINES_ENABLED) is False:
             return None
-        graph = Config._parse_pipelines(pipelines_config)
+        graph_config = self._expand_pipeline_config_paths(
+            pipelines_config,
+            self.pipelines_path,
+            self.pipelines_dir,
+            resolve_stage_filenames=True,
+        )
+        graph = Config._parse_pipelines(graph_config)
         graph.validate()
         return graph
 
@@ -64,15 +71,24 @@ class PipelinesStore:
 
     def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
         pipelines_config = self._normalize_pipelines_config(raw_pipelines)
-        self._validate_pipelines_config(pipelines_config)
+        pipelines_config = self._relativize_stage_filenames(
+            pipelines_config, self.pipelines_path, self.pipelines_dir
+        )
+        self._validate_pipelines_config(
+            pipelines_config, self.pipelines_path, self.pipelines_dir
+        )
         self._write_yaml(self.pipelines_path, pipelines_config)
         return self.pipelines_response(pipelines_config)
 
     def deploy_pipeline_config_pipelines(self) -> dict[str, Any]:
         pipelines_config = self.load_pipeline_config_pipelines()
-        self._validate_pipelines_config(pipelines_config)
+        self._validate_pipelines_config(
+            pipelines_config, self.pipelines_path, self.pipelines_dir
+        )
         deployed_config = self._copy_stage_files_to_deployed(pipelines_config)
-        self._validate_pipelines_config(deployed_config)
+        self._validate_pipelines_config(
+            deployed_config, self.deployed_path, self.deployed_dir
+        )
         self._write_yaml(self.deployed_path, deployed_config)
         return self.pipelines_response(deployed_config)
 
@@ -92,7 +108,12 @@ class PipelinesStore:
             if pipeline.get("id") != "example-resize"
         ]
         pipelines.append(self._example_resize_pipeline_config(stage_path))
-        self._validate_pipelines_config(pipelines_config)
+        pipelines_config = self._relativize_stage_filenames(
+            pipelines_config, self.pipelines_path, self.pipelines_dir
+        )
+        self._validate_pipelines_config(
+            pipelines_config, self.pipelines_path, self.pipelines_dir
+        )
         self._write_yaml(self.pipelines_path, pipelines_config)
         return self.pipelines_response(pipelines_config)
 
@@ -134,13 +155,27 @@ class PipelinesStore:
         }
 
     def _validate_pipelines_config(
-        self, pipelines_config: dict[str, Any]
+        self,
+        pipelines_config: dict[str, Any],
+        yaml_path: Path | None = None,
+        allowed_root: Path | None = None,
     ) -> PipelineGraph:
         errors: list[str] = []
-        self.config._validate_pipelines(pipelines_config, "pipelines", errors)
+        validation_config = pipelines_config
+        if yaml_path is not None and allowed_root is not None:
+            try:
+                validation_config = self._expand_pipeline_config_paths(
+                    pipelines_config,
+                    yaml_path,
+                    allowed_root,
+                    resolve_stage_filenames=True,
+                )
+            except ValueError as ex:
+                errors.append(str(ex))
+        self.config._validate_pipelines(validation_config, "pipelines", errors)
         if errors:
             raise ValueError("Invalid pipelines:\n- " + "\n- ".join(errors))
-        graph = Config._parse_pipelines(pipelines_config)
+        graph = Config._parse_pipelines(validation_config)
         graph.validate()
         return graph
 
@@ -171,6 +206,16 @@ class PipelinesStore:
     def _copy_stage_files_to_deployed(
         self, pipelines_config: dict[str, Any]
     ) -> dict[str, Any]:
+        return self._copy_pipeline_config_to_deployed(
+            pipelines_config, self.pipelines_path, self.deployed_path
+        )
+
+    def _copy_pipeline_config_to_deployed(
+        self,
+        pipelines_config: dict[str, Any],
+        source_yaml_path: Path,
+        deployed_yaml_path: Path,
+    ) -> dict[str, Any]:
         deployed_config = deepcopy(pipelines_config)
         for pipeline in deployed_config.get(Config.KEY_PIPELINES, []):
             if not isinstance(pipeline, dict):
@@ -180,17 +225,242 @@ class PipelinesStore:
                     continue
                 filename = stage.get("filename")
                 if not isinstance(filename, str) or not filename:
+                    pipeline_path = stage.get("pipeline")
+                    if isinstance(pipeline_path, str) and self._is_yaml_path(
+                        pipeline_path
+                    ):
+                        source_path = self._config_path_under(
+                            pipeline_path, source_yaml_path, self.pipelines_dir
+                        )
+                        deployed_path = self.deployed_dir / source_path.relative_to(
+                            self.pipelines_dir
+                        )
+                        child_config = self._load_yaml(source_path)
+                        deployed_child_config = self._copy_pipeline_config_to_deployed(
+                            child_config, source_path, deployed_path
+                        )
+                        self._write_yaml(deployed_path, deployed_child_config)
+                        stage["pipeline"] = self._relative_path(
+                            deployed_path, deployed_yaml_path
+                        )
                     continue
-                source_path = Path(filename)
-                if not source_path.exists():
-                    continue
-                deployed_path = self.deployed_dir / source_path.name
-                copy2(source_path, deployed_path)
-                stage["filename"] = str(deployed_path)
+
+                source_path = self._stage_path_under(
+                    filename, source_yaml_path, self.pipelines_dir
+                )
+                if source_path.exists():
+                    deployed_path = self.deployed_dir / source_path.relative_to(
+                        self.pipelines_dir
+                    )
+                    deployed_path.parent.mkdir(parents=True, exist_ok=True)
+                    copy2(source_path, deployed_path)
+                    stage["filename"] = self._relative_path(
+                        deployed_path, deployed_yaml_path
+                    )
         return deployed_config
 
+    def _relativize_stage_filenames(
+        self, pipelines_config: dict[str, Any], yaml_path: Path, allowed_root: Path
+    ) -> dict[str, Any]:
+        config = deepcopy(pipelines_config)
+        for pipeline in config.get(Config.KEY_PIPELINES, []):
+            if not isinstance(pipeline, dict):
+                continue
+            for stage in pipeline.get("stages", []):
+                if not isinstance(stage, dict):
+                    continue
+                filename = stage.get("filename")
+                if not isinstance(filename, str) or not filename:
+                    continue
+                path = Path(filename)
+                if path.is_absolute():
+                    raise ValueError(
+                        f"stage filename must be relative to {yaml_path}: {filename}"
+                    )
+                self._stage_path_under(filename, yaml_path, allowed_root)
+        return config
+
+    def _resolve_stage_filenames(
+        self, pipelines_config: dict[str, Any], yaml_path: Path, allowed_root: Path
+    ) -> dict[str, Any]:
+        config = deepcopy(pipelines_config)
+        for pipeline in config.get(Config.KEY_PIPELINES, []):
+            if not isinstance(pipeline, dict):
+                continue
+            for stage in pipeline.get("stages", []):
+                if not isinstance(stage, dict):
+                    continue
+                filename = stage.get("filename")
+                if not isinstance(filename, str) or not filename:
+                    continue
+                stage["filename"] = str(
+                    self._stage_path_under(filename, yaml_path, allowed_root)
+                )
+        return config
+
+    def _expand_pipeline_config_paths(
+        self,
+        pipelines_config: dict[str, Any],
+        yaml_path: Path,
+        allowed_root: Path,
+        resolve_stage_filenames: bool,
+        seen_paths: set[Path] | None = None,
+    ) -> dict[str, Any]:
+        seen_paths = seen_paths or set()
+        yaml_path = yaml_path.resolve()
+        if yaml_path in seen_paths:
+            raise ValueError(f"pipeline config include cycle at {yaml_path}")
+
+        seen_paths.add(yaml_path)
+        config = self._normalize_pipelines_config(pipelines_config)
+        if resolve_stage_filenames:
+            config = self._resolve_stage_filenames(config, yaml_path, allowed_root)
+        else:
+            config = deepcopy(config)
+
+        merged_pipelines = list(config.get(Config.KEY_PIPELINES, []))
+        merged_edges = list(config.get(Config.KEY_PIPELINE_EDGES, []))
+        path_reference_targets: dict[str, str] = {}
+
+        for pipeline in list(merged_pipelines):
+            if not isinstance(pipeline, dict):
+                continue
+            source_pipeline_id = pipeline.get("id")
+            stages = pipeline.get("stages", [])
+            if not isinstance(source_pipeline_id, str) or not isinstance(stages, list):
+                continue
+            for stage in stages:
+                if not isinstance(stage, dict):
+                    continue
+                pipeline_reference = stage.get("pipeline")
+                if not (
+                    isinstance(pipeline_reference, str)
+                    and self._is_yaml_path(pipeline_reference)
+                ):
+                    continue
+
+                child_yaml_path = self._config_path_under(
+                    pipeline_reference, yaml_path, allowed_root
+                )
+                child_config = self._load_yaml(child_yaml_path)
+                expanded_child = self._expand_pipeline_config_paths(
+                    child_config,
+                    child_yaml_path,
+                    allowed_root,
+                    resolve_stage_filenames,
+                    seen_paths,
+                )
+                child_graph = Config._parse_pipelines(expanded_child)
+                child_sources = child_graph.source_pipeline_ids()
+                if len(child_sources) != 1:
+                    raise ValueError(
+                        f"pipeline config {child_yaml_path} must define exactly "
+                        "one source pipeline"
+                    )
+
+                child_pipeline_id = child_sources[0]
+                stage["pipeline"] = child_pipeline_id
+                path_reference_targets[pipeline_reference] = child_pipeline_id
+                for child_pipeline in expanded_child.get(Config.KEY_PIPELINES, []):
+                    merged_pipelines.append(child_pipeline)
+                for child_edge in expanded_child.get(Config.KEY_PIPELINE_EDGES, []):
+                    merged_edges.append(child_edge)
+
+        for edge in merged_edges:
+            if not isinstance(edge, dict):
+                continue
+            target = edge.get(Config.KEY_PIPELINE_EDGE_TO)
+            if isinstance(target, str) and target in path_reference_targets:
+                edge[Config.KEY_PIPELINE_EDGE_TO] = path_reference_targets[target]
+            source = edge.get(Config.KEY_PIPELINE_EDGE_FROM)
+            if isinstance(source, str) and source in path_reference_targets:
+                edge[Config.KEY_PIPELINE_EDGE_FROM] = path_reference_targets[source]
+
+        config[Config.KEY_PIPELINES] = merged_pipelines
+        config[Config.KEY_PIPELINE_EDGES] = [
+            edge
+            for edge in merged_edges
+            if not (
+                isinstance(edge, dict)
+                and (
+                    self._is_yaml_path(str(edge.get(Config.KEY_PIPELINE_EDGE_FROM, "")))
+                    or self._is_yaml_path(
+                        str(edge.get(Config.KEY_PIPELINE_EDGE_TO, ""))
+                    )
+                )
+            )
+        ]
+        return self._normalize_pipelines_config(config)
+
+    def _validate_stage_filenames_under(
+        self,
+        pipelines_config: dict[str, Any],
+        yaml_path: Path,
+        allowed_root: Path,
+        errors: list[str] | None = None,
+    ) -> None:
+        for pipeline in pipelines_config.get(Config.KEY_PIPELINES, []):
+            if not isinstance(pipeline, dict):
+                continue
+            pipeline_id = pipeline.get("id", "<unknown>")
+            for stage in pipeline.get("stages", []):
+                if not isinstance(stage, dict):
+                    continue
+                filename = stage.get("filename")
+                if not isinstance(filename, str) or not filename:
+                    continue
+                try:
+                    self._stage_path_under(filename, yaml_path, allowed_root)
+                except ValueError as ex:
+                    message = f"pipeline {pipeline_id} stage {stage.get('id', '<unknown>')}: {ex}"
+                    if errors is None:
+                        raise ValueError(message) from ex
+                    errors.append(message)
+
+    def _stage_path_under(
+        self, filename: str, yaml_path: Path, allowed_root: Path
+    ) -> Path:
+        return self._relative_path_under(filename, yaml_path, allowed_root, "stage")
+
+    def _config_path_under(
+        self, filename: str, yaml_path: Path, allowed_root: Path
+    ) -> Path:
+        path = self._relative_path_under(filename, yaml_path, allowed_root, "pipeline")
+        if not self._is_yaml_path(filename):
+            raise ValueError(f"pipeline config reference must be a YAML file: {filename}")
+        if not path.exists():
+            raise ValueError(f"pipeline config does not exist: {filename}")
+        return path
+
+    def _relative_path_under(
+        self, filename: str, yaml_path: Path, allowed_root: Path, label: str
+    ) -> Path:
+        path = Path(filename)
+        if path.is_absolute():
+            raise ValueError(
+                f"{label} filename must be relative to {yaml_path}: {filename}"
+            )
+
+        yaml_dir = yaml_path.parent.resolve()
+        allowed_root = allowed_root.resolve()
+        resolved_path = (yaml_dir / path).resolve()
+        try:
+            resolved_path.relative_to(allowed_root)
+        except ValueError as ex:
+            raise ValueError(
+                f"{label} filename escapes {allowed_root}: {filename}"
+            ) from ex
+        return resolved_path
+
     @staticmethod
-    def _example_resize_pipeline_config(stage_path: Path) -> dict[str, Any]:
+    def _is_yaml_path(value: str) -> bool:
+        return Path(value).suffix.lower() in {".yaml", ".yml"}
+
+    def _relative_path(self, path: Path, yaml_path: Path) -> str:
+        resolved_path = path.resolve()
+        return relpath(resolved_path, yaml_path.parent.resolve())
+
+    def _example_resize_pipeline_config(self, stage_path: Path) -> dict[str, Any]:
         return {
             "id": "example-resize",
             "name": "Example resize",
@@ -199,7 +469,7 @@ class PipelinesStore:
                 {
                     "id": "resize-frame",
                     "enabled": True,
-                    "filename": str(stage_path),
+                    "filename": self._relative_path(stage_path, self.pipelines_path),
                     "class": "ExampleResizeStage",
                     "config": {
                         "output_width": 640,

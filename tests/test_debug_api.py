@@ -237,7 +237,7 @@ class DebugApiTest(unittest.TestCase):
                                     {
                                         "id": "custom",
                                         "enabled": True,
-                                        "filename": str(pipelines_stage_path),
+                                        "filename": "custom_stage.py",
                                         "class": "CustomStage",
                                         "config": {},
                                     }
@@ -277,11 +277,168 @@ class DebugApiTest(unittest.TestCase):
             )
             self.assertTrue(deployed_stage_path.is_file())
             self.assertEqual(
-                str(deployed_stage_path),
+                "custom_stage.py",
                 deployed_data["pipelines"][0]["stages"][0]["filename"],
             )
             self.assertEqual("deployed-pipeline", pipelines["pipelines"][0]["id"])
             self.assertEqual({}, state.sessions)
+
+    def test_pipeline_config_save_rejects_stage_paths_outside_pipelines_dir(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            TestableDebugApiHandler.api_state = DebugApiState(config, FakeFrameSource)
+
+            for filename in ("/tmp/custom_stage.py", "../custom_stage.py"):
+                handler = TestableDebugApiHandler(
+                    "/api/pipeline_config/pipelines",
+                    method="POST",
+                    body=json.dumps(
+                        {
+                            "enabled": True,
+                            "frame_interval_seconds": 2,
+                            "pipelines": [
+                                {
+                                    "id": "bad-pipeline",
+                                    "enabled": True,
+                                    "stages": [
+                                        {
+                                            "id": "custom",
+                                            "enabled": True,
+                                            "filename": filename,
+                                            "class": "CustomStage",
+                                            "config": {},
+                                        }
+                                    ],
+                                }
+                            ],
+                            "edges": [],
+                        }
+                    ).encode("utf-8"),
+                )
+
+                handler.do_POST()
+                response = json.loads(handler.wfile.getvalue().decode("utf-8"))
+
+                self.assertEqual(400, handler.status)
+                self.assertIn("stage filename", response["error"])
+
+    def test_stage_filename_resolves_relative_to_referencing_yaml_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            store = DebugApiState(config, FakeFrameSource).pipelines_store
+            nested_yaml_path = (
+                temp_path / "pipeline_config" / "pipelines" / "preprocessors" / "resize.yaml"
+            )
+            nested_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            stage_path = temp_path / "pipeline_config" / "pipelines" / "resize_stage.py"
+            stage_path.write_text("", encoding="utf-8")
+
+            resolved_path = store._stage_path_under(
+                "../resize_stage.py",
+                nested_yaml_path,
+                temp_path / "pipeline_config" / "pipelines",
+            )
+
+            self.assertEqual(stage_path.resolve(), resolved_path)
+
+    def test_pipeline_stage_can_reference_child_yaml_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            store = DebugApiState(config, FakeFrameSource).pipelines_store
+            pipelines_dir = temp_path / "pipeline_config" / "pipelines"
+            child_yaml_path = pipelines_dir / "preprocessors" / "resize-pipeline.yaml"
+            child_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            stage_path = pipelines_dir / "resize_stage.py"
+            stage_path.write_text(
+                "from nvr_common.pipeline import PipelineStageResult\n"
+                "\n"
+                "class ResizeStage:\n"
+                "    def __init__(self, config):\n"
+                "        self.config = config\n"
+                "\n"
+                "    def process(self, context):\n"
+                "        return PipelineStageResult(output_image=context.current_image)\n",
+                encoding="utf-8",
+            )
+            store._write_yaml(
+                store.pipelines_path,
+                {
+                    "enabled": True,
+                    "frame_interval_seconds": 0.5,
+                    "pipelines": [
+                        {
+                            "id": "resize-stage",
+                            "enabled": True,
+                            "stages": [
+                                {
+                                    "id": "resize-frame",
+                                    "enabled": True,
+                                    "pipeline": "preprocessors/resize-pipeline.yaml",
+                                }
+                            ],
+                        }
+                    ],
+                    "edges": [],
+                },
+            )
+            store._write_yaml(
+                child_yaml_path,
+                {
+                    "enabled": True,
+                    "pipelines": [
+                        {
+                            "id": "resize-pipeline",
+                            "enabled": True,
+                            "stages": [
+                                {
+                                    "id": "resize-frame",
+                                    "enabled": True,
+                                    "filename": "../resize_stage.py",
+                                    "class": "ResizeStage",
+                                    "config": {},
+                                }
+                            ],
+                        }
+                    ],
+                    "edges": [],
+                },
+            )
+
+            graph = store.pipeline_config_graph()
+
+            self.assertEqual(
+                ("resize-stage", "resize-pipeline"),
+                graph.topological_pipeline_ids(),
+            )
+            self.assertEqual(
+                str(stage_path.resolve()),
+                graph.pipeline_by_id()["resize-pipeline"].stages[0].filename,
+            )
+
+            deployed = store.deploy_pipeline_config_pipelines()
+            deployed_root = yaml.safe_load(store.deployed_path.read_text())
+            deployed_child_path = (
+                temp_path
+                / "pipeline_config"
+                / "deployed"
+                / "preprocessors"
+                / "resize-pipeline.yaml"
+            )
+            deployed_child = yaml.safe_load(deployed_child_path.read_text())
+
+            self.assertEqual(0.5, deployed["frame_interval_seconds"])
+            self.assertEqual(
+                "preprocessors/resize-pipeline.yaml",
+                deployed_root["pipelines"][0]["stages"][0]["pipeline"],
+            )
+            self.assertEqual(
+                "../resize_stage.py",
+                deployed_child["pipelines"][0]["stages"][0]["filename"],
+            )
+            self.assertTrue((temp_path / "pipeline_config" / "deployed" / "resize_stage.py").is_file())
 
     def test_generate_example_resize_pipeline_writes_to_pipeline_storage(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -328,7 +485,7 @@ class DebugApiTest(unittest.TestCase):
                 )
             )
             self.assertEqual(
-                str(stage_path),
+                "example_resize_stage.py",
                 pipeline_config_pipeline["stages"][0]["filename"],
             )
             self.assertEqual(
