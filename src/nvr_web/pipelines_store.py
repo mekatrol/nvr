@@ -194,6 +194,7 @@ class PipelinesStore:
             "deployed_path": str(self.deployed_path),
             "pipeline_conf_path": str(self.pipeline_conf_path),
             "config_path": str(self.config_path),
+            "pipeline_file_tree": self.pipeline_file_tree(),
             "pipelines_config": pipelines_config,
             "pipelines": [
                 {
@@ -218,6 +219,41 @@ class PipelinesStore:
             ],
             "edges": [{"from": edge.source, "to": edge.target} for edge in graph.edges],
         }
+
+    def pipeline_file_tree(self) -> list[dict[str, Any]]:
+        return self._directory_tree(self.pipelines_dir)
+
+    def _directory_tree(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+
+        nodes: list[dict[str, Any]] = []
+        for child in sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+            if child.name.startswith("."):
+                continue
+            if child.is_dir():
+                children = self._directory_tree(child)
+                if children:
+                    nodes.append(
+                        {
+                            "type": "directory",
+                            "name": child.name,
+                            "path": self._relative_path(child, self.pipelines_path),
+                            "children": children,
+                        }
+                    )
+                continue
+            if child.suffix.lower() not in {".py", ".yaml", ".yml"}:
+                continue
+            nodes.append(
+                {
+                    "type": "file",
+                    "name": child.name,
+                    "path": self._relative_path(child, self.pipelines_path),
+                    "children": [],
+                }
+            )
+        return nodes
 
     def _validate_pipelines_config(
         self,

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import MainNavBar from './components/MainNavBar.vue'
+import PipelineFileTree from './components/PipelineFileTree.vue'
 
 type Camera = {
   id: string
@@ -31,6 +32,13 @@ type Pipeline = {
 type Edge = {
   from: string
   to: string
+}
+
+type PipelineFileTreeNode = {
+  type: 'directory' | 'file'
+  name: string
+  path: string
+  children: PipelineFileTreeNode[]
 }
 
 type PipelineIntegrityIssue = {
@@ -66,6 +74,7 @@ type PipelinesResponse = {
   enabled: boolean
   integrity?: PipelineIntegrity
   frame_interval_seconds: number | string | null
+  pipeline_file_tree?: PipelineFileTreeNode[]
   pipelines: Pipeline[]
   edges: Edge[]
 }
@@ -110,6 +119,7 @@ const pipelineConfigEnabled = ref(true)
 const pipelineConfigFrameIntervalSeconds = ref(String(defaultPipelineFrameIntervalSeconds))
 const pipelineConfigPipelines = ref<Pipeline[]>([])
 const pipelineConfigEdges = ref<Edge[]>([])
+const pipelineFileTree = ref<PipelineFileTreeNode[]>([])
 const pipelineIntegrity = ref<PipelineIntegrity>({ ok: true, issues: [] })
 const currentView = ref<'index' | 'debug'>('index')
 const debugPipelineId = ref('')
@@ -243,6 +253,7 @@ async function loadPipelineConfigPipelines() {
     graph.frame_interval_seconds ?? defaultPipelineFrameIntervalSeconds,
   )
   pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
+  pipelineFileTree.value = graph.pipeline_file_tree ?? []
   pipelineConfigPipelines.value = graph.pipelines
   pipelineConfigEdges.value = graph.edges
   if (!selectedPipelineId.value && pipelineConfigPipelines.value[0]) {
@@ -394,6 +405,7 @@ async function savePipelineConfigPipelines() {
   )
   pipelineConfigPipelines.value = saved.pipelines
   pipelineConfigEdges.value = saved.edges
+  pipelineFileTree.value = saved.pipeline_file_tree ?? pipelineFileTree.value
   refreshSelectedEditors()
   deployStatus.value = 'Pipelines saved'
 }
@@ -413,6 +425,7 @@ async function deployPipelineConfigPipelines() {
   const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
   edges.value = deployed.edges
+  pipelineFileTree.value = deployed.pipeline_file_tree ?? pipelineFileTree.value
   await loadDebugState()
   deployStatus.value = 'Pipelines deployed and server config reloaded'
 }
@@ -423,6 +436,7 @@ async function generateExampleResizePipeline() {
   pipelineConfigFrameIntervalSeconds.value = String(
     generated.frame_interval_seconds ?? defaultPipelineFrameIntervalSeconds,
   )
+  pipelineFileTree.value = generated.pipeline_file_tree ?? []
   pipelineConfigPipelines.value = generated.pipelines
   pipelineConfigEdges.value = generated.edges
   selectPipeline('example-resize')
@@ -434,6 +448,7 @@ async function deployPipelinesFromEditor() {
   const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
   edges.value = deployed.edges
+  pipelineFileTree.value = deployed.pipeline_file_tree ?? pipelineFileTree.value
   deployStatus.value = 'Pipelines deployed and server config reloaded'
 }
 
@@ -955,7 +970,13 @@ onBeforeUnmount(() => {
               </button>
             </header>
             <div class="tree">
-              <div v-if="pipelineConfigPipelines.length === 0" class="tree-empty">No pipelines</div>
+              <div
+                v-if="pipelineFileTree.length === 0 && pipelineConfigPipelines.length === 0"
+                class="tree-empty"
+              >
+                No pipelines
+              </div>
+              <PipelineFileTree v-if="pipelineFileTree.length > 0" :nodes="pipelineFileTree" />
               <div
                 v-for="pipeline in pipelineConfigPipelines"
                 :key="pipeline.id"

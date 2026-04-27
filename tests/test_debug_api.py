@@ -440,6 +440,32 @@ class DebugApiTest(unittest.TestCase):
             )
             self.assertTrue((temp_path / "pipeline_config" / "deployed" / "resize_stage.py").is_file())
 
+    def test_pipeline_config_response_includes_yaml_and_python_file_tree(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            store = DebugApiState(config, FakeFrameSource).pipelines_store
+            pipelines_dir = temp_path / "pipeline_config" / "pipelines"
+            nested_dir = pipelines_dir / "preprocessors"
+            nested_dir.mkdir(parents=True, exist_ok=True)
+            (pipelines_dir / "pipelines.yaml").write_text("pipelines: []\n", encoding="utf-8")
+            (pipelines_dir / "resize_stage.py").write_text("", encoding="utf-8")
+            (nested_dir / "resize.yaml").write_text("pipelines: []\n", encoding="utf-8")
+            (nested_dir / "resize.py").write_text("", encoding="utf-8")
+            (nested_dir / "notes.txt").write_text("", encoding="utf-8")
+
+            response = store.pipeline_config_response()
+
+            tree = response["pipeline_file_tree"]
+            self.assertEqual("preprocessors", tree[0]["name"])
+            self.assertEqual(
+                ["resize.py", "resize.yaml"],
+                [node["name"] for node in tree[0]["children"]],
+            )
+            self.assertIn("pipelines.yaml", [node["name"] for node in tree])
+            self.assertIn("resize_stage.py", [node["name"] for node in tree])
+            self.assertNotIn("notes.txt", [node["name"] for node in tree[0]["children"]])
+
     def test_generate_example_resize_pipeline_writes_to_pipeline_storage(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
