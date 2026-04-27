@@ -13,7 +13,7 @@
                 "PYTHONPATH": "${workspaceFolder}/src"
             },
             "justMyCode": true,
-            "preLaunchTask": "Start NVR Vue UI",
+            "preLaunchTask": "Start NVR Web Debug Services",
             "serverReadyAction": {
                 "pattern": "NVR web UI ready at (https?://\\S+)",
                 "uriFormat": "%s",
@@ -67,6 +67,7 @@
                 "Debug NVR Web API Only",
                 "Debug NVR Vue UI"
             ],
+            "preLaunchTask": "Start VS Code Web Editor",
             "stopAll": true
         }
     ]

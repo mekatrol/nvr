@@ -2,6 +2,15 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "Start NVR Web Debug Services",
+            "dependsOrder": "parallel",
+            "dependsOn": [
+                "Start NVR Vue UI",
+                "Start VS Code Web Editor"
+            ],
+            "problemMatcher": []
+        },
+        {
             "label": "Start NVR Vue UI",
             "type": "shell",
             "command": "npm run dev:debug",
@@ -21,6 +30,30 @@
                     "activeOnStart": true,
                     "beginsPattern": ".*VITE.*",
                     "endsPattern": ".*Local:\\s+http://127\\.0\\.0\\.1:5173/.*"
+                }
+            }
+        },
+        {
+            "label": "Start VS Code Web Editor",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "${workspaceFolder}/scripts/start_vscode_web.sh",
+                "/home/dad/nvr/pipeline_config"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "vscode-web",
+                "pattern": {
+                    "regexp": "^$",
+                    "file": 1,
+                    "location": 2,
+                    "message": 3
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*(Starting VS Code Web editor|VS Code Web editor already running).*",
+                    "endsPattern": ".*Web UI available at http://127\\.0\\.0\\.1:8000.*"
                 }
             }
         }
