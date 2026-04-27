@@ -80,13 +80,23 @@ type LogSeverity = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
 const logSeverityOptions: LogSeverity[] = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
 
 const iconPaths = {
-  pipeline: 'M3 5.5A2.5 2.5 0 0 1 5.5 3H9l2 2h7.5A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z',
+  debugger: 'M4 5h16v10H4zM8 19h8M10 15v4M14 15v4M8 9h8M8 12h5',
+  editor: 'M4 20h16M5 16l10.5-10.5a2.1 2.1 0 0 1 3 3L8 19H5z',
+  log: 'M6 4h12v16H6zM9 8h6M9 12h6M9 16h4',
+  pipeline:
+    'M3 5.5A2.5 2.5 0 0 1 5.5 3H9l2 2h7.5A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z',
   stage: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5',
   file: 'M6 3h8l4 4v14H6zM14 3v5h5',
   link: 'M10 13a5 5 0 0 0 7.5.5l2-2A5 5 0 0 0 12.5 4l-1 1M14 11a5 5 0 0 0-7.5-.5l-2 2A5 5 0 0 0 11.5 20l1-1',
   plus: 'M12 5v14M5 12h14',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3',
 } as const
+
+const primaryNavItems = [
+  { to: '/', label: 'Debugger', icon: 'debugger' },
+  { to: '/editor', label: 'Editor', icon: 'editor' },
+  { to: '/log', label: 'Log', icon: 'log' },
+] as const
 
 const cameras = ref<Camera[]>([])
 const defaultPipelineFrameIntervalSeconds = 0.5
@@ -182,7 +192,9 @@ const canStep = computed(
 const canEditPipelines = computed(() => !isRunLoopActive.value && !isActionBusy.value)
 const canApplyPipeline = computed(() => canEditPipelines.value && hasPipelinesPipeline.value)
 const canApplyStage = computed(() => canEditPipelines.value && hasPipelinesStage.value)
-const canAddEdge = computed(() => canEditPipelines.value && pipelineConfigPipelines.value.length >= 2)
+const canAddEdge = computed(
+  () => canEditPipelines.value && pipelineConfigPipelines.value.length >= 2,
+)
 const canSetBreakpoint = computed(
   () =>
     hasSelectedCamera.value &&
@@ -208,13 +220,19 @@ async function loadCameras() {
 
 async function loadPipelines() {
   if (!selectedCameraId.value) return
-  const graph = await getJson<{ pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }>(
-    `/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}`,
-  )
+  const graph = await getJson<{
+    pipelines: Pipeline[]
+    edges: Edge[]
+    integrity?: PipelineIntegrity
+  }>(`/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}`)
   applyPipelineGraph(graph)
 }
 
-function applyPipelineGraph(graph: { pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }) {
+function applyPipelineGraph(graph: {
+  pipelines: Pipeline[]
+  edges: Edge[]
+  integrity?: PipelineIntegrity
+}) {
   pipelines.value = graph.pipelines
   edges.value = graph.edges
   pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
@@ -238,10 +256,11 @@ async function loadPipelineConfigPipelines() {
 
 async function reloadPipelines() {
   await stopRunLoop(false)
-  const graph = await postJson<{ pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }>(
-    '/api/pipelines/reload',
-    {},
-  )
+  const graph = await postJson<{
+    pipelines: Pipeline[]
+    edges: Edge[]
+    integrity?: PipelineIntegrity
+  }>('/api/pipelines/reload', {})
   applyPipelineGraph(graph)
   await loadPipelineConfigPipelines()
   await loadDebugState()
@@ -371,7 +390,10 @@ async function savePipelineConfigPipelines() {
     apiError.value = validationError
     return
   }
-  const saved = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines', toPipelinesPayload())
+  const saved = await postJson<PipelinesResponse>(
+    '/api/pipeline_config/pipelines',
+    toPipelinesPayload(),
+  )
   pipelineConfigPipelines.value = saved.pipelines
   pipelineConfigEdges.value = saved.edges
   refreshSelectedEditors()
@@ -406,7 +428,8 @@ async function generateExampleResizePipeline() {
   pipelineConfigPipelines.value = generated.pipelines
   pipelineConfigEdges.value = generated.edges
   selectPipeline('example-resize')
-  deployStatus.value = 'Example resize pipeline generated. Use Debugger to run it, or deploy pipelines when ready.'
+  deployStatus.value =
+    'Example resize pipeline generated. Use Debugger to run it, or deploy pipelines when ready.'
 }
 
 async function deployPipelinesFromEditor() {
@@ -469,7 +492,10 @@ function formatJson(value: unknown) {
 }
 
 function addPipeline() {
-  const baseId = uniqueId('pipeline', pipelineConfigPipelines.value.map((pipeline) => pipeline.id))
+  const baseId = uniqueId(
+    'pipeline',
+    pipelineConfigPipelines.value.map((pipeline) => pipeline.id),
+  )
   pipelineConfigPipelines.value.push({
     id: baseId,
     name: baseId,
@@ -644,7 +670,9 @@ function toPipelinesPayload() {
   const interval = Number(pipelineConfigFrameIntervalSeconds.value)
   return {
     enabled: pipelineConfigEnabled.value,
-    frame_interval_seconds: Number.isFinite(interval) ? interval : pipelineConfigFrameIntervalSeconds.value,
+    frame_interval_seconds: Number.isFinite(interval)
+      ? interval
+      : pipelineConfigFrameIntervalSeconds.value,
     pipelines: pipelineConfigPipelines.value.map((pipeline) => ({
       id: pipeline.id,
       name: pipeline.name || pipeline.id,
@@ -785,432 +813,553 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main v-if="isEditorRoute" class="vscode-shell">
-    <header class="vscode-header">
-      <div>
-        <strong>NVR Editor</strong>
-        <span>pipeline_conf.yaml and Python stage files</span>
-      </div>
-      <nav>
-        <button :disabled="!canEditPipelines" @click="withAction('example_resize', generateExampleResizePipeline)">Example Resize</button>
-        <button :disabled="!canEditPipelines" @click="withAction('deploy_pipelines', deployPipelinesFromEditor)">Deploy Pipelines</button>
-        <RouterLink to="/">Debugger</RouterLink>
-        <RouterLink to="/log">Log</RouterLink>
-        <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
+  <div class="app-layout">
+    <aside class="app-sidebar">
+      <div class="app-brand">NVR</div>
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <RouterLink v-for="item in primaryNavItems" :key="item.to" :to="item.to">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path :d="iconPaths[item.icon]" />
+          </svg>
+          <span>{{ item.label }}</span>
+        </RouterLink>
       </nav>
-    </header>
-    <section class="vscode-stage">
-      <p v-if="apiError" class="vscode-message error">{{ apiError }}</p>
-      <p v-if="deployStatus" class="vscode-message status">{{ deployStatus }}</p>
-      <iframe
-        class="vscode-frame"
-        :src="vscodeWebUrl"
-        title="VS Code Web editor"
-        allow="clipboard-read; clipboard-write"
-        @load="vscodeLoadFailed = false"
-        @error="vscodeLoadFailed = true"
-      ></iframe>
-      <div v-if="vscodeLoadFailed" class="vscode-error">
-        <strong>VS Code Web is not available.</strong>
-        <span>Start it with code serve-web --host 127.0.0.1 --port 8000 --without-connection-token --accept-server-license-terms --default-folder /home/dad/nvr/pipeline_config, then reload this view.</span>
-      </div>
-    </section>
-  </main>
+    </aside>
 
-  <main v-else-if="isLogRoute" class="log-shell">
-    <header class="vscode-header">
-      <div>
-        <strong>NVR Log</strong>
-        <span>{{ filteredLogEntries.length }} / {{ logEntries.length }} entries shown</span>
-      </div>
-      <nav>
-        <fieldset class="log-filter">
-          <legend>Severity</legend>
-          <label v-for="level in logSeverityOptions" :key="level">
-            <input v-model="selectedLogSeverities" type="checkbox" :value="level" />
-            <span>{{ level }}</span>
-          </label>
-        </fieldset>
-        <button :disabled="isLoadingLogs" @click="loadLogs">Refresh</button>
-        <button :disabled="isLoadingLogs || logEntries.length === 0" @click="clearLogs">Clear</button>
-        <RouterLink to="/">Debugger</RouterLink>
-        <RouterLink to="/editor">Editor</RouterLink>
-      </nav>
-    </header>
-
-    <section class="log-workspace">
-      <p v-if="apiError" class="log-error">{{ apiError }}</p>
-      <div class="log-table" role="table" aria-label="NVR log entries">
-        <div class="log-row log-heading" role="row">
-          <span role="columnheader">Date/time</span>
-          <span role="columnheader">Log level</span>
-          <span role="columnheader">Log description</span>
-        </div>
-        <div v-if="filteredLogEntries.length === 0" class="log-empty">No log entries</div>
-        <div v-for="(entry, index) in filteredLogEntries" :key="`${entry.timestamp}-${index}`" class="log-row" role="row">
-          <span class="log-time" role="cell">{{ entry.timestamp }}</span>
-          <span class="log-level" :class="`level-${entry.level.toLowerCase()}`" role="cell">
-            {{ entry.level }}
-          </span>
-          <span class="log-description" role="cell">{{ entry.description }}</span>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <main v-else class="shell">
-    <aside class="sidebar">
-      <div class="brand">NVR Debugger</div>
-      <nav class="sidebar-nav">
-        <RouterLink to="/">Debugger</RouterLink>
-        <RouterLink to="/editor">Editor</RouterLink>
-        <RouterLink to="/log">Log</RouterLink>
-      </nav>
-      <label class="field">
-        <span>Camera</span>
-        <select v-model="selectedCameraId" @change="refreshCamera">
-          <option v-if="isLoadingCameras" value="">Loading cameras</option>
-          <option v-else-if="cameras.length === 0" value="">No cameras loaded</option>
-          <option v-for="camera in cameras" :key="camera.id" :value="camera.id">
-            {{ camera.name }}
-          </option>
-        </select>
-      </label>
-      <button
-        class="refresh-button"
-        :disabled="isActionBusy || isRunLoopActive"
-        @click="withAction('refresh_cameras', () => loadCameras().then(refreshCamera))"
-      >
-        Refresh Cameras
-      </button>
-      <div class="camera-state">
-        <span>{{ selectedCamera?.enabled ? 'Recorder enabled' : 'Recorder disabled' }}</span>
-        <span>{{ selectedCamera?.pipeline_enabled ? 'Pipeline enabled' : 'Pipeline disabled' }}</span>
-      </div>
-      <section v-if="hasPipelineIntegrityProblem" class="pipeline-integrity">
-        <strong>Pipeline integrity problem</strong>
-        <span v-for="(issue, index) in pipelineIntegrity.issues" :key="index">
-          {{ issue.message }}
-        </span>
+    <main class="app-content">
+      <section v-if="isEditorRoute" class="vscode-shell">
+        <header class="vscode-header">
+          <div>
+            <strong>NVR Editor</strong>
+            <span>pipeline_conf.yaml and Python stage files</span>
+          </div>
+          <div class="vscode-actions">
+            <button
+              :disabled="!canEditPipelines"
+              @click="withAction('example_resize', generateExampleResizePipeline)"
+            >
+              Example Resize
+            </button>
+            <button
+              :disabled="!canEditPipelines"
+              @click="withAction('deploy_pipelines', deployPipelinesFromEditor)"
+            >
+              Deploy Pipelines
+            </button>
+            <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
+          </div>
+        </header>
+        <section class="vscode-stage">
+          <p v-if="apiError" class="vscode-message error">{{ apiError }}</p>
+          <p v-if="deployStatus" class="vscode-message status">{{ deployStatus }}</p>
+          <iframe
+            class="vscode-frame"
+            :src="vscodeWebUrl"
+            title="VS Code Web editor"
+            allow="clipboard-read; clipboard-write"
+            @load="vscodeLoadFailed = false"
+            @error="vscodeLoadFailed = true"
+          ></iframe>
+          <div v-if="vscodeLoadFailed" class="vscode-error">
+            <strong>VS Code Web is not available.</strong>
+            <span
+              >Start it with code serve-web --host 127.0.0.1 --port 8000 --without-connection-token
+              --accept-server-license-terms --default-folder /home/dad/nvr/pipeline_config, then
+              reload this view.</span
+            >
+          </div>
+        </section>
       </section>
 
-      <section class="tree-panel">
-        <header>
-          <strong>Pipeline Tree</strong>
-          <button title="Add pipeline" :disabled="!canEditPipelines" @click="addPipelineFromTree">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="iconPaths.plus" />
-            </svg>
-          </button>
+      <section v-else-if="isLogRoute" class="log-shell">
+        <header class="vscode-header">
+          <div>
+            <strong>NVR Log</strong>
+            <span>{{ filteredLogEntries.length }} / {{ logEntries.length }} entries shown</span>
+          </div>
+          <div class="log-actions">
+            <fieldset class="log-filter">
+              <legend>Severity</legend>
+              <label v-for="level in logSeverityOptions" :key="level">
+                <input v-model="selectedLogSeverities" type="checkbox" :value="level" />
+                <span>{{ level }}</span>
+              </label>
+            </fieldset>
+            <button :disabled="isLoadingLogs" @click="loadLogs">Refresh</button>
+            <button :disabled="isLoadingLogs || logEntries.length === 0" @click="clearLogs">
+              Clear
+            </button>
+          </div>
         </header>
-        <div class="tree">
-          <div v-if="pipelineConfigPipelines.length === 0" class="tree-empty">No pipelines</div>
-          <div v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" class="tree-branch">
+
+        <section class="log-workspace">
+          <p v-if="apiError" class="log-error">{{ apiError }}</p>
+          <div class="log-table" role="table" aria-label="NVR log entries">
+            <div class="log-row log-heading" role="row">
+              <span role="columnheader">Date/time</span>
+              <span role="columnheader">Log level</span>
+              <span role="columnheader">Log description</span>
+            </div>
+            <div v-if="filteredLogEntries.length === 0" class="log-empty">No log entries</div>
             <div
-              class="tree-row"
-              :class="{ selected: pipeline.id === selectedPipelineId && !selectedStageId }"
-              @click="selectPipeline(pipeline.id)"
-              @dblclick="openPipelineDebug(pipeline.id)"
+              v-for="(entry, index) in filteredLogEntries"
+              :key="`${entry.timestamp}-${index}`"
+              class="log-row"
+              role="row"
             >
-              <span class="tree-icon">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="iconPaths.pipeline" />
-                </svg>
+              <span class="log-time" role="cell">{{ entry.timestamp }}</span>
+              <span class="log-level" :class="`level-${entry.level.toLowerCase()}`" role="cell">
+                {{ entry.level }}
               </span>
-              <span class="tree-label">{{ pipeline.name || pipeline.id }}</span>
-              <button title="Add stage" :disabled="!canEditPipelines" @click.stop="addStageToPipeline(pipeline.id)">
+              <span class="log-description" role="cell">{{ entry.description }}</span>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section v-else class="shell">
+        <aside class="sidebar">
+          <div class="brand">NVR Debugger</div>
+          <label class="field">
+            <span>Camera</span>
+            <select v-model="selectedCameraId" @change="refreshCamera">
+              <option v-if="isLoadingCameras" value="">Loading cameras</option>
+              <option v-else-if="cameras.length === 0" value="">No cameras loaded</option>
+              <option v-for="camera in cameras" :key="camera.id" :value="camera.id">
+                {{ camera.name }}
+              </option>
+            </select>
+          </label>
+          <button
+            class="refresh-button"
+            :disabled="isActionBusy || isRunLoopActive"
+            @click="withAction('refresh_cameras', () => loadCameras().then(refreshCamera))"
+          >
+            Refresh Cameras
+          </button>
+          <div class="camera-state">
+            <span>{{ selectedCamera?.enabled ? 'Recorder enabled' : 'Recorder disabled' }}</span>
+            <span>{{
+              selectedCamera?.pipeline_enabled ? 'Pipeline enabled' : 'Pipeline disabled'
+            }}</span>
+          </div>
+          <section v-if="hasPipelineIntegrityProblem" class="pipeline-integrity">
+            <strong>Pipeline integrity problem</strong>
+            <span v-for="(issue, index) in pipelineIntegrity.issues" :key="index">
+              {{ issue.message }}
+            </span>
+          </section>
+
+          <section class="tree-panel">
+            <header>
+              <strong>Pipeline Tree</strong>
+              <button
+                title="Add pipeline"
+                :disabled="!canEditPipelines"
+                @click="addPipelineFromTree"
+              >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="iconPaths.plus" />
                 </svg>
               </button>
-              <button title="Remove pipeline" :disabled="!canEditPipelines" @click.stop="deletePipeline(pipeline.id)">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="iconPaths.trash" />
-                </svg>
-              </button>
-            </div>
-            <div class="tree-children">
+            </header>
+            <div class="tree">
+              <div v-if="pipelineConfigPipelines.length === 0" class="tree-empty">No pipelines</div>
               <div
-                v-for="stage in pipeline.stages"
-                :key="stage.id"
-                class="tree-row stage"
-                :class="{ selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId }"
-                @click="selectStageInPipeline(pipeline.id, stage.id)"
-                @dblclick="openStageDebug(pipeline.id, stage.id)"
+                v-for="pipeline in pipelineConfigPipelines"
+                :key="pipeline.id"
+                class="tree-branch"
               >
-                <span class="tree-icon">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="stage.pipeline ? iconPaths.link : stage.filename ? iconPaths.file : iconPaths.stage" />
-                  </svg>
-                </span>
-                <span class="tree-label">{{ stage.id }}</span>
-                <button title="Remove stage" :disabled="!canEditPipelines" @click.stop="deleteStage(pipeline.id, stage.id)">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="iconPaths.trash" />
-                  </svg>
-                </button>
+                <div
+                  class="tree-row"
+                  :class="{ selected: pipeline.id === selectedPipelineId && !selectedStageId }"
+                  @click="selectPipeline(pipeline.id)"
+                  @dblclick="openPipelineDebug(pipeline.id)"
+                >
+                  <span class="tree-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="iconPaths.pipeline" />
+                    </svg>
+                  </span>
+                  <span class="tree-label">{{ pipeline.name || pipeline.id }}</span>
+                  <button
+                    title="Add stage"
+                    :disabled="!canEditPipelines"
+                    @click.stop="addStageToPipeline(pipeline.id)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="iconPaths.plus" />
+                    </svg>
+                  </button>
+                  <button
+                    title="Remove pipeline"
+                    :disabled="!canEditPipelines"
+                    @click.stop="deletePipeline(pipeline.id)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="iconPaths.trash" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="tree-children">
+                  <div
+                    v-for="stage in pipeline.stages"
+                    :key="stage.id"
+                    class="tree-row stage"
+                    :class="{
+                      selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId,
+                    }"
+                    @click="selectStageInPipeline(pipeline.id, stage.id)"
+                    @dblclick="openStageDebug(pipeline.id, stage.id)"
+                  >
+                    <span class="tree-icon">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          :d="
+                            stage.pipeline
+                              ? iconPaths.link
+                              : stage.filename
+                                ? iconPaths.file
+                                : iconPaths.stage
+                          "
+                        />
+                      </svg>
+                    </span>
+                    <span class="tree-label">{{ stage.id }}</span>
+                    <button
+                      title="Remove stage"
+                      :disabled="!canEditPipelines"
+                      @click.stop="deleteStage(pipeline.id, stage.id)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path :d="iconPaths.trash" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
+          </section>
 
-      <div class="controls">
-        <button :disabled="!canRun" @click="startRunLoop">{{ isRunLoopActive ? 'Running' : 'Run' }}</button>
-        <button :disabled="!canStop" @click="stopDebuggerRun">Stop</button>
-        <button :disabled="!canStep" @click="runDebuggerCommand('step')">Step</button>
-        <button :disabled="!canStep" @click="runDebuggerCommand('step_over_stage')">Step Stage</button>
-        <button :disabled="!canStep" @click="runDebuggerCommand('step_over_pipeline')">Step Pipeline</button>
-      </div>
-      <label class="field">
-        <span>Breakpoint</span>
-        <select v-model="selectedBreakpoint">
-          <option value="">None</option>
-          <template v-for="pipeline in pipelines" :key="pipeline.id">
-            <option :value="`${pipeline.id}:`">{{ pipeline.id }}</option>
-            <option
-              v-for="stage in pipeline.stages"
-              :key="`${pipeline.id}:${stage.id}`"
-              :value="`${pipeline.id}:${stage.id}`"
-            >
-              {{ pipeline.id }} / {{ stage.id }}
-            </option>
-          </template>
-        </select>
-      </label>
-      <div class="breakpoint-actions">
-        <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(true)">Set</button>
-        <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(false)">Clear</button>
-      </div>
-      <p v-if="apiError" class="error">{{ apiError }}</p>
-      <p v-if="deployStatus" class="status">{{ deployStatus }}</p>
-    </aside>
-
-    <section v-if="currentView === 'index'" class="workspace">
-      <header class="statusbar">
-        <span>Pipelines</span>
-        <span>{{ pipelines.length }} configured</span>
-      </header>
-
-      <section v-if="hasPipelineIntegrityProblem" class="workspace-integrity">
-        <strong>Pipeline integrity problem</strong>
-        <span v-for="(issue, index) in pipelineIntegrity.issues" :key="index">
-          {{ issue.message }}
-        </span>
-      </section>
-
-      <section class="pipeline-index">
-        <article v-for="pipeline in pipelines" :key="pipeline.id" class="pipeline-card">
-          <header>
-            <div>
-              <strong>{{ pipeline.name || pipeline.id }}</strong>
-              <small>{{ pipeline.id }}</small>
-            </div>
-            <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
-          </header>
-          <div class="stage-list">
-            <div v-for="stage in pipeline.stages" :key="stage.id" class="stage-row static">
-              <span>{{ stage.id }}</span>
-              <small>{{ stageSummary(stage) }}</small>
-            </div>
-          </div>
-          <div class="pipeline-card-actions">
-            <button :disabled="hasPipelineIntegrityProblem" @click="openPipelineDebug(pipeline.id)">View</button>
-            <button :disabled="isActionBusy" @click="withAction('reload_pipelines', reloadPipelines)">Reload</button>
-          </div>
-        </article>
-      </section>
-    </section>
-
-    <section v-else class="workspace">
-      <header class="statusbar">
-        <button @click="showPipelineIndex">Pipelines</button>
-        <span v-if="hasPipelineIntegrityProblem">Debugging blocked: pipeline integrity problem</span>
-        <span v-else>Status: {{ debugState.status }}</span>
-        <span>Step {{ debugState.cursor ?? 0 }} / {{ debugState.total_steps ?? 0 }}</span>
-      </header>
-
-      <section class="graph">
-        <div v-for="pipeline in visiblePipelines" :key="pipeline.id" class="pipeline-card">
-          <header>
-            <strong>{{ pipeline.name || pipeline.id }}</strong>
-            <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
-          </header>
-          <button v-for="stage in pipeline.stages" :key="stage.id" class="stage-row">
-            <span>{{ stage.id }}</span>
-            <small>{{ stageSummary(stage) }}</small>
-          </button>
-        </div>
-      </section>
-
-      <section class="editor">
-        <header class="editor-header">
-          <strong>Pipeline Configuration</strong>
-          <div class="editor-actions">
-            <button :disabled="!canEditPipelines" @click="withAction('reload_pipelines', loadPipelineConfigPipelines)">Reload Pipelines</button>
-            <button :disabled="!canEditPipelines" @click="withAction('save_pipelines', savePipelineConfigPipelines)">Save Pipelines</button>
-            <button :disabled="!canEditPipelines" @click="withAction('deploy_pipelines', deployPipelineConfigPipelines)">Deploy</button>
-          </div>
-        </header>
-
-        <div class="editor-grid">
-          <section class="editor-panel">
-            <header>
-              <strong>Pipelines</strong>
-              <button :disabled="!canEditPipelines" @click="addPipeline">Add</button>
-            </header>
-            <label class="inline-field">
-              <span>Enabled</span>
-              <input v-model="pipelineConfigEnabled" type="checkbox" />
-            </label>
-            <label class="field light">
-              <span>Frame interval seconds</span>
-              <input v-model="pipelineConfigFrameIntervalSeconds" type="text" inputmode="decimal" />
-            </label>
-            <button
-              v-for="pipeline in pipelineConfigPipelines"
-              :key="pipeline.id"
-              class="stage-row"
-              :class="{ selected: pipeline.id === selectedPipelineId }"
-              @click="selectPipeline(pipeline.id)"
-            >
-              <span>{{ pipeline.id }}</span>
-              <small>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</small>
+          <div class="controls">
+            <button :disabled="!canRun" @click="startRunLoop">
+              {{ isRunLoopActive ? 'Running' : 'Run' }}
             </button>
-          </section>
-
-          <section class="editor-panel">
-            <header>
-              <strong>Pipeline</strong>
-              <button :disabled="!canApplyPipeline" @click="deleteSelectedPipeline">Delete</button>
-            </header>
-            <label class="field light">
-              <span>ID</span>
-              <input v-model="selectedPipelineIdEdit" type="text" />
-            </label>
-            <label class="field light">
-              <span>Name</span>
-              <input v-model="selectedPipelineNameEdit" type="text" />
-            </label>
-            <label class="inline-field">
-              <span>Enabled</span>
-              <input v-if="selectedPipelinesPipeline" v-model="selectedPipelinesPipeline.enabled" type="checkbox" />
-            </label>
-            <label class="field light">
-              <span>Required inputs</span>
-              <input v-model="selectedPipelineRequiredInputs" type="text" />
-            </label>
-            <button :disabled="!canApplyPipeline" @click="applyPipelineEdits">Apply Pipeline</button>
-
-            <header>
-              <strong>Stages</strong>
-              <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
-            </header>
-            <button
-              v-for="stage in selectedPipelinesPipeline?.stages ?? []"
-              :key="stage.id"
-              class="stage-row"
-              :class="{ selected: stage.id === selectedStageId }"
-              @click="selectStage(stage.id)"
-            >
-              <span>{{ stage.id }}</span>
-              <small>{{ stageSummary(stage) }}</small>
+            <button :disabled="!canStop" @click="stopDebuggerRun">Stop</button>
+            <button :disabled="!canStep" @click="runDebuggerCommand('step')">Step</button>
+            <button :disabled="!canStep" @click="runDebuggerCommand('step_over_stage')">
+              Step Stage
             </button>
+            <button :disabled="!canStep" @click="runDebuggerCommand('step_over_pipeline')">
+              Step Pipeline
+            </button>
+          </div>
+          <label class="field">
+            <span>Breakpoint</span>
+            <select v-model="selectedBreakpoint">
+              <option value="">None</option>
+              <template v-for="pipeline in pipelines" :key="pipeline.id">
+                <option :value="`${pipeline.id}:`">{{ pipeline.id }}</option>
+                <option
+                  v-for="stage in pipeline.stages"
+                  :key="`${pipeline.id}:${stage.id}`"
+                  :value="`${pipeline.id}:${stage.id}`"
+                >
+                  {{ pipeline.id }} / {{ stage.id }}
+                </option>
+              </template>
+            </select>
+          </label>
+          <div class="breakpoint-actions">
+            <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(true)">Set</button>
+            <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(false)">Clear</button>
+          </div>
+          <p v-if="apiError" class="error">{{ apiError }}</p>
+          <p v-if="deployStatus" class="status">{{ deployStatus }}</p>
+        </aside>
+
+        <section v-if="currentView === 'index'" class="workspace">
+          <header class="statusbar">
+            <span>Pipelines</span>
+            <span>{{ pipelines.length }} configured</span>
+          </header>
+
+          <section v-if="hasPipelineIntegrityProblem" class="workspace-integrity">
+            <strong>Pipeline integrity problem</strong>
+            <span v-for="(issue, index) in pipelineIntegrity.issues" :key="index">
+              {{ issue.message }}
+            </span>
           </section>
 
-          <section class="editor-panel">
-            <header>
-              <strong>Stage</strong>
-              <button :disabled="!canApplyStage" @click="deleteSelectedStage">Delete</button>
-            </header>
-            <label class="field light">
-              <span>ID</span>
-              <input v-model="selectedStageIdEdit" type="text" />
-            </label>
-            <label class="inline-field">
-              <span>Enabled</span>
-              <input v-if="selectedPipelinesStage" v-model="selectedPipelinesStage.enabled" type="checkbox" />
-            </label>
-            <label class="field light">
-              <span>Filename</span>
-              <input v-model="selectedStageFilename" type="text" />
-            </label>
-            <label class="field light">
-              <span>Pipeline reference</span>
-              <select v-model="selectedStagePipeline">
-                <option value=""></option>
-                <option v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" :value="pipeline.id">
-                  {{ pipeline.id }}
-                </option>
-              </select>
-            </label>
-            <label class="field light">
-              <span>Class</span>
-              <input v-model="selectedStageClassName" type="text" />
-            </label>
-            <label class="field light">
-              <span>Legacy module</span>
-              <input v-model="selectedStageModule" type="text" />
-            </label>
-            <label class="field light">
-              <span>Config JSON</span>
-              <textarea v-model="selectedStageConfigJson" rows="8"></textarea>
-            </label>
-            <button :disabled="!canApplyStage" @click="applyStageEdits">Apply Stage</button>
+          <section class="pipeline-index">
+            <article v-for="pipeline in pipelines" :key="pipeline.id" class="pipeline-card">
+              <header>
+                <div>
+                  <strong>{{ pipeline.name || pipeline.id }}</strong>
+                  <small>{{ pipeline.id }}</small>
+                </div>
+                <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
+              </header>
+              <div class="stage-list">
+                <div v-for="stage in pipeline.stages" :key="stage.id" class="stage-row static">
+                  <span>{{ stage.id }}</span>
+                  <small>{{ stageSummary(stage) }}</small>
+                </div>
+              </div>
+              <div class="pipeline-card-actions">
+                <button
+                  :disabled="hasPipelineIntegrityProblem"
+                  @click="openPipelineDebug(pipeline.id)"
+                >
+                  View
+                </button>
+                <button
+                  :disabled="isActionBusy"
+                  @click="withAction('reload_pipelines', reloadPipelines)"
+                >
+                  Reload
+                </button>
+              </div>
+            </article>
           </section>
+        </section>
 
-          <section class="editor-panel">
-            <header>
-              <strong>Edges</strong>
-              <button :disabled="!canAddEdge" @click="addEdge">Add</button>
-            </header>
-            <div v-for="(edge, index) in pipelineConfigEdges" :key="index" class="edge-row">
-              <select v-model="edge.from">
-                <option v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" :value="pipeline.id">
-                  {{ pipeline.id }}
-                </option>
-              </select>
-              <select v-model="edge.to">
-                <option v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" :value="pipeline.id">
-                  {{ pipeline.id }}
-                </option>
-              </select>
-              <button :disabled="!canEditPipelines" @click="deleteEdge(index)">Delete</button>
+        <section v-else class="workspace">
+          <header class="statusbar">
+            <button @click="showPipelineIndex">Pipelines</button>
+            <span v-if="hasPipelineIntegrityProblem"
+              >Debugging blocked: pipeline integrity problem</span
+            >
+            <span v-else>Status: {{ debugState.status }}</span>
+            <span>Step {{ debugState.cursor ?? 0 }} / {{ debugState.total_steps ?? 0 }}</span>
+          </header>
+
+          <section class="graph">
+            <div v-for="pipeline in visiblePipelines" :key="pipeline.id" class="pipeline-card">
+              <header>
+                <strong>{{ pipeline.name || pipeline.id }}</strong>
+                <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
+              </header>
+              <button v-for="stage in pipeline.stages" :key="stage.id" class="stage-row">
+                <span>{{ stage.id }}</span>
+                <small>{{ stageSummary(stage) }}</small>
+              </button>
             </div>
           </section>
-        </div>
-      </section>
 
-      <section class="details">
-        <div class="preview">
-          <header>
-            <strong>Preview</strong>
-            <span>{{ latestRecord?.pipeline_id }} / {{ latestRecord?.stage_id }}</span>
-          </header>
-          <div class="preview-surface">
-            <img
-              v-if="latestRecord?.output_preview"
-              :src="latestRecord.output_preview"
-              alt="Latest stage output preview"
-            />
-            <span v-else>No preview available</span>
-            <footer>
-              <span>Input {{ latestRecord?.input_shape ?? [] }}</span>
-              <span>Output {{ latestRecord?.output_shape ?? [] }}</span>
-            </footer>
-          </div>
-        </div>
+          <section class="editor">
+            <header class="editor-header">
+              <strong>Pipeline Configuration</strong>
+              <div class="editor-actions">
+                <button
+                  :disabled="!canEditPipelines"
+                  @click="withAction('reload_pipelines', loadPipelineConfigPipelines)"
+                >
+                  Reload Pipelines
+                </button>
+                <button
+                  :disabled="!canEditPipelines"
+                  @click="withAction('save_pipelines', savePipelineConfigPipelines)"
+                >
+                  Save Pipelines
+                </button>
+                <button
+                  :disabled="!canEditPipelines"
+                  @click="withAction('deploy_pipelines', deployPipelineConfigPipelines)"
+                >
+                  Deploy
+                </button>
+              </div>
+            </header>
 
-        <div class="metadata">
-          <header>
-            <strong>Metadata</strong>
-            <span>{{ edges.length }} edges</span>
-          </header>
-          <pre>{{ formatJson(metadata) }}</pre>
-        </div>
+            <div class="editor-grid">
+              <section class="editor-panel">
+                <header>
+                  <strong>Pipelines</strong>
+                  <button :disabled="!canEditPipelines" @click="addPipeline">Add</button>
+                </header>
+                <label class="inline-field">
+                  <span>Enabled</span>
+                  <input v-model="pipelineConfigEnabled" type="checkbox" />
+                </label>
+                <label class="field light">
+                  <span>Frame interval seconds</span>
+                  <input
+                    v-model="pipelineConfigFrameIntervalSeconds"
+                    type="text"
+                    inputmode="decimal"
+                  />
+                </label>
+                <button
+                  v-for="pipeline in pipelineConfigPipelines"
+                  :key="pipeline.id"
+                  class="stage-row"
+                  :class="{ selected: pipeline.id === selectedPipelineId }"
+                  @click="selectPipeline(pipeline.id)"
+                >
+                  <span>{{ pipeline.id }}</span>
+                  <small>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</small>
+                </button>
+              </section>
+
+              <section class="editor-panel">
+                <header>
+                  <strong>Pipeline</strong>
+                  <button :disabled="!canApplyPipeline" @click="deleteSelectedPipeline">
+                    Delete
+                  </button>
+                </header>
+                <label class="field light">
+                  <span>ID</span>
+                  <input v-model="selectedPipelineIdEdit" type="text" />
+                </label>
+                <label class="field light">
+                  <span>Name</span>
+                  <input v-model="selectedPipelineNameEdit" type="text" />
+                </label>
+                <label class="inline-field">
+                  <span>Enabled</span>
+                  <input
+                    v-if="selectedPipelinesPipeline"
+                    v-model="selectedPipelinesPipeline.enabled"
+                    type="checkbox"
+                  />
+                </label>
+                <label class="field light">
+                  <span>Required inputs</span>
+                  <input v-model="selectedPipelineRequiredInputs" type="text" />
+                </label>
+                <button :disabled="!canApplyPipeline" @click="applyPipelineEdits">
+                  Apply Pipeline
+                </button>
+
+                <header>
+                  <strong>Stages</strong>
+                  <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
+                </header>
+                <button
+                  v-for="stage in selectedPipelinesPipeline?.stages ?? []"
+                  :key="stage.id"
+                  class="stage-row"
+                  :class="{ selected: stage.id === selectedStageId }"
+                  @click="selectStage(stage.id)"
+                >
+                  <span>{{ stage.id }}</span>
+                  <small>{{ stageSummary(stage) }}</small>
+                </button>
+              </section>
+
+              <section class="editor-panel">
+                <header>
+                  <strong>Stage</strong>
+                  <button :disabled="!canApplyStage" @click="deleteSelectedStage">Delete</button>
+                </header>
+                <label class="field light">
+                  <span>ID</span>
+                  <input v-model="selectedStageIdEdit" type="text" />
+                </label>
+                <label class="inline-field">
+                  <span>Enabled</span>
+                  <input
+                    v-if="selectedPipelinesStage"
+                    v-model="selectedPipelinesStage.enabled"
+                    type="checkbox"
+                  />
+                </label>
+                <label class="field light">
+                  <span>Filename</span>
+                  <input v-model="selectedStageFilename" type="text" />
+                </label>
+                <label class="field light">
+                  <span>Pipeline reference</span>
+                  <select v-model="selectedStagePipeline">
+                    <option value=""></option>
+                    <option
+                      v-for="pipeline in pipelineConfigPipelines"
+                      :key="pipeline.id"
+                      :value="pipeline.id"
+                    >
+                      {{ pipeline.id }}
+                    </option>
+                  </select>
+                </label>
+                <label class="field light">
+                  <span>Class</span>
+                  <input v-model="selectedStageClassName" type="text" />
+                </label>
+                <label class="field light">
+                  <span>Legacy module</span>
+                  <input v-model="selectedStageModule" type="text" />
+                </label>
+                <label class="field light">
+                  <span>Config JSON</span>
+                  <textarea v-model="selectedStageConfigJson" rows="8"></textarea>
+                </label>
+                <button :disabled="!canApplyStage" @click="applyStageEdits">Apply Stage</button>
+              </section>
+
+              <section class="editor-panel">
+                <header>
+                  <strong>Edges</strong>
+                  <button :disabled="!canAddEdge" @click="addEdge">Add</button>
+                </header>
+                <div v-for="(edge, index) in pipelineConfigEdges" :key="index" class="edge-row">
+                  <select v-model="edge.from">
+                    <option
+                      v-for="pipeline in pipelineConfigPipelines"
+                      :key="pipeline.id"
+                      :value="pipeline.id"
+                    >
+                      {{ pipeline.id }}
+                    </option>
+                  </select>
+                  <select v-model="edge.to">
+                    <option
+                      v-for="pipeline in pipelineConfigPipelines"
+                      :key="pipeline.id"
+                      :value="pipeline.id"
+                    >
+                      {{ pipeline.id }}
+                    </option>
+                  </select>
+                  <button :disabled="!canEditPipelines" @click="deleteEdge(index)">Delete</button>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="details">
+            <div class="preview">
+              <header>
+                <strong>Preview</strong>
+                <span>{{ latestRecord?.pipeline_id }} / {{ latestRecord?.stage_id }}</span>
+              </header>
+              <div class="preview-surface">
+                <img
+                  v-if="latestRecord?.output_preview"
+                  :src="latestRecord.output_preview"
+                  alt="Latest stage output preview"
+                />
+                <span v-else>No preview available</span>
+                <footer>
+                  <span>Input {{ latestRecord?.input_shape ?? [] }}</span>
+                  <span>Output {{ latestRecord?.output_shape ?? [] }}</span>
+                </footer>
+              </div>
+            </div>
+
+            <div class="metadata">
+              <header>
+                <strong>Metadata</strong>
+                <span>{{ edges.length }} edges</span>
+              </header>
+              <pre>{{ formatJson(metadata) }}</pre>
+            </div>
+          </section>
+        </section>
       </section>
-    </section>
-  </main>
+    </main>
+  </div>
 </template>
 
 <style scoped>
@@ -1221,7 +1370,12 @@ onBeforeUnmount(() => {
 :global(body) {
   margin: 0;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
     sans-serif;
   background: #f4f6f8;
   color: #1f2933;
@@ -1246,6 +1400,68 @@ button:disabled svg {
   opacity: 0.75;
 }
 
+.app-layout {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+.app-sidebar {
+  display: flex;
+  position: sticky;
+  top: 0;
+  flex-direction: column;
+  gap: 20px;
+  height: 100vh;
+  border-right: 1px solid #304157;
+  padding: 20px 16px;
+  background: #111b28;
+  color: #f7fafc;
+}
+
+.app-brand {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.primary-nav {
+  display: grid;
+  gap: 6px;
+}
+
+.primary-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #cbd5df;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.primary-nav a:hover,
+.primary-nav a.router-link-active {
+  background: #223044;
+  color: #ffffff;
+}
+
+.primary-nav svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-content {
+  min-width: 0;
+}
+
 .shell {
   display: grid;
   min-height: 100vh;
@@ -1266,14 +1482,9 @@ button:disabled svg {
   font-weight: 700;
 }
 
-.sidebar-nav {
-  display: flex;
-  gap: 8px;
-}
-
-.sidebar-nav a,
 .vscode-header a,
-.vscode-header button {
+.vscode-header button,
+.log-actions button {
   border: 1px solid #506070;
   border-radius: 6px;
   padding: 8px 10px;
@@ -1282,10 +1493,6 @@ button:disabled svg {
   text-decoration: none;
   font-size: 13px;
   cursor: pointer;
-}
-
-.sidebar-nav a.router-link-active {
-  background: #26364a;
 }
 
 .field {
@@ -1317,8 +1524,7 @@ button:disabled svg {
 
 .field textarea {
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   font-size: 12px;
 }
 
@@ -1710,7 +1916,7 @@ button:disabled svg {
 .vscode-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  height: 100vh;
+  min-height: 100vh;
   background: #101820;
 }
 
@@ -1725,7 +1931,7 @@ button:disabled svg {
   color: #f7fafc;
 }
 
-.vscode-header div {
+.vscode-header > div:first-child {
   display: grid;
   gap: 2px;
 }
@@ -1735,8 +1941,10 @@ button:disabled svg {
   font-size: 13px;
 }
 
-.vscode-header nav {
+.vscode-actions,
+.log-actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -1870,8 +2078,7 @@ button:disabled svg {
 
 .log-time,
 .log-level {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 }
 
 .log-level {
@@ -1903,10 +2110,24 @@ button:disabled svg {
 }
 
 @media (max-width: 820px) {
+  .app-layout,
   .shell,
   .details,
   .editor-grid {
     grid-template-columns: 1fr;
+  }
+
+  .app-sidebar {
+    position: static;
+    height: auto;
+  }
+
+  .primary-nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .primary-nav a {
+    justify-content: center;
   }
 
   .vscode-header {
