@@ -43,11 +43,18 @@ class DebugApiState:
         return cameras
 
     def pipelines(self, camera_id: str | None = None) -> dict[str, Any]:
+        integrity = self.pipelines_store.pipeline_integrity()
         graph = self.pipelines_store.pipeline_config_graph()
         if graph is None:
-            return {"enabled": False, "pipelines": [], "edges": []}
+            return {
+                "enabled": False,
+                "integrity": integrity,
+                "pipelines": [],
+                "edges": [],
+            }
         return {
             "enabled": True,
+            "integrity": integrity,
             "pipelines": [
                 {
                     "id": pipeline.id,
@@ -70,6 +77,14 @@ class DebugApiState:
         }
 
     def session(self, camera_id: str) -> PipelineDebugSession | None:
+        integrity = self.pipelines_store.pipeline_integrity()
+        if not integrity.get("ok", False):
+            self.sessions.pop(camera_id, None)
+            if self.logger is not None:
+                self.logger.warning(
+                    "Pipeline debug session blocked because integrity check failed"
+                )
+            return None
         if camera_id in self.sessions:
             return self.sessions[camera_id]
         graph = self.pipelines_store.pipeline_config_graph()
@@ -81,6 +96,12 @@ class DebugApiState:
 
     def pipeline_config_pipelines(self) -> dict[str, Any]:
         return self.pipelines_store.pipeline_config_response()
+
+    def reload_pipelines(self) -> dict[str, Any]:
+        self.pipelines_store = PipelinesStore(self.config, logger=self.logger)
+        self.sessions.clear()
+        self.close_frame_sources()
+        return self.pipelines(None)
 
     def log_entries(self, limit: int = 500) -> list[dict[str, Any]]:
         return LogReader(Logger().log_file_path).entries(limit)

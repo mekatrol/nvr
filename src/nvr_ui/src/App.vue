@@ -32,6 +32,16 @@ type Edge = {
   to: string
 }
 
+type PipelineIntegrityIssue = {
+  level: string
+  message: string
+}
+
+type PipelineIntegrity = {
+  ok: boolean
+  issues: PipelineIntegrityIssue[]
+}
+
 type DebugRecord = {
   pipeline_id: string
   stage_id: string
@@ -53,6 +63,7 @@ type DebugState = {
 
 type PipelinesResponse = {
   enabled: boolean
+  integrity?: PipelineIntegrity
   frame_interval_seconds: number | string | null
   pipelines: Pipeline[]
   edges: Edge[]
@@ -91,6 +102,7 @@ const pipelineConfigEnabled = ref(true)
 const pipelineConfigFrameIntervalSeconds = ref(String(defaultPipelineFrameIntervalSeconds))
 const pipelineConfigPipelines = ref<Pipeline[]>([])
 const pipelineConfigEdges = ref<Edge[]>([])
+const pipelineIntegrity = ref<PipelineIntegrity>({ ok: true, issues: [] })
 const currentView = ref<'index' | 'debug'>('index')
 const debugPipelineId = ref('')
 const selectedPipelineId = ref('')
@@ -128,6 +140,7 @@ const selectedCamera = computed(() =>
 )
 
 const latestRecord = computed(() => debugState.value.records?.at(-1))
+const hasPipelineIntegrityProblem = computed(() => !pipelineIntegrity.value.ok)
 
 const filteredLogEntries = computed(() => {
   const selectedLevels = new Set(selectedLogSeverities.value)
@@ -152,11 +165,19 @@ const hasSelectedCamera = computed(() => selectedCameraId.value.length > 0)
 const hasPipelinesPipeline = computed(() => Boolean(selectedPipelinesPipeline.value))
 const hasPipelinesStage = computed(() => Boolean(selectedPipelinesStage.value))
 const canRun = computed(
-  () => hasSelectedCamera.value && !isRunLoopActive.value && !isActionBusy.value,
+  () =>
+    hasSelectedCamera.value &&
+    !hasPipelineIntegrityProblem.value &&
+    !isRunLoopActive.value &&
+    !isActionBusy.value,
 )
 const canStop = computed(() => isRunLoopActive.value && !isActionBusy.value)
 const canStep = computed(
-  () => hasSelectedCamera.value && !isRunLoopActive.value && !isActionBusy.value,
+  () =>
+    hasSelectedCamera.value &&
+    !hasPipelineIntegrityProblem.value &&
+    !isRunLoopActive.value &&
+    !isActionBusy.value,
 )
 const canEditPipelines = computed(() => !isRunLoopActive.value && !isActionBusy.value)
 const canApplyPipeline = computed(() => canEditPipelines.value && hasPipelinesPipeline.value)
@@ -165,6 +186,7 @@ const canAddEdge = computed(() => canEditPipelines.value && pipelineConfigPipeli
 const canSetBreakpoint = computed(
   () =>
     hasSelectedCamera.value &&
+    !hasPipelineIntegrityProblem.value &&
     selectedBreakpoint.value.length > 0 &&
     !isRunLoopActive.value &&
     !isActionBusy.value,
@@ -186,11 +208,16 @@ async function loadCameras() {
 
 async function loadPipelines() {
   if (!selectedCameraId.value) return
-  const graph = await getJson<{ pipelines: Pipeline[]; edges: Edge[] }>(
+  const graph = await getJson<{ pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }>(
     `/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}`,
   )
+  applyPipelineGraph(graph)
+}
+
+function applyPipelineGraph(graph: { pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }) {
   pipelines.value = graph.pipelines
   edges.value = graph.edges
+  pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
 }
 
 async function loadPipelineConfigPipelines() {
@@ -199,6 +226,7 @@ async function loadPipelineConfigPipelines() {
   pipelineConfigFrameIntervalSeconds.value = String(
     graph.frame_interval_seconds ?? defaultPipelineFrameIntervalSeconds,
   )
+  pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
   pipelineConfigPipelines.value = graph.pipelines
   pipelineConfigEdges.value = graph.edges
   if (!selectedPipelineId.value && pipelineConfigPipelines.value[0]) {
@@ -206,6 +234,18 @@ async function loadPipelineConfigPipelines() {
   } else {
     refreshSelectedEditors()
   }
+}
+
+async function reloadPipelines() {
+  await stopRunLoop(false)
+  const graph = await postJson<{ pipelines: Pipeline[]; edges: Edge[]; integrity?: PipelineIntegrity }>(
+    '/api/pipelines/reload',
+    {},
+  )
+  applyPipelineGraph(graph)
+  await loadPipelineConfigPipelines()
+  await loadDebugState()
+  deployStatus.value = 'Pipelines reloaded'
 }
 
 async function loadDebugState() {
@@ -561,7 +601,7 @@ async function applyStageEdits() {
     await stopRunLoop(false)
     await savePipelineConfigPipelines()
     await loadPipelines()
-    if (selectedCameraId.value) {
+    if (selectedCameraId.value && !hasPipelineIntegrityProblem.value) {
       await runCommand('run')
     } else {
       await loadDebugState()
@@ -632,6 +672,7 @@ function stageSummary(stage: Stage) {
 }
 
 function openPipelineDebug(pipelineId: string) {
+  if (hasPipelineIntegrityProblem.value) return
   debugPipelineId.value = pipelineId
   selectedPipelineId.value = pipelineId
   currentView.value = 'debug'
@@ -639,6 +680,7 @@ function openPipelineDebug(pipelineId: string) {
 }
 
 function openStageDebug(pipelineId: string, stageId: string) {
+  if (hasPipelineIntegrityProblem.value) return
   debugPipelineId.value = pipelineId
   selectedPipelineId.value = pipelineId
   selectedStageId.value = stageId
@@ -845,6 +887,12 @@ onBeforeUnmount(() => {
         <span>{{ selectedCamera?.enabled ? 'Recorder enabled' : 'Recorder disabled' }}</span>
         <span>{{ selectedCamera?.pipeline_enabled ? 'Pipeline enabled' : 'Pipeline disabled' }}</span>
       </div>
+      <section v-if="hasPipelineIntegrityProblem" class="pipeline-integrity">
+        <strong>Pipeline integrity problem</strong>
+        <span v-for="(issue, index) in pipelineIntegrity.issues" :key="index">
+          {{ issue.message }}
+        </span>
+      </section>
 
       <section class="tree-panel">
         <header>
@@ -944,6 +992,13 @@ onBeforeUnmount(() => {
         <span>{{ pipelines.length }} configured</span>
       </header>
 
+      <section v-if="hasPipelineIntegrityProblem" class="workspace-integrity">
+        <strong>Pipeline integrity problem</strong>
+        <span v-for="(issue, index) in pipelineIntegrity.issues" :key="index">
+          {{ issue.message }}
+        </span>
+      </section>
+
       <section class="pipeline-index">
         <article v-for="pipeline in pipelines" :key="pipeline.id" class="pipeline-card">
           <header>
@@ -959,7 +1014,10 @@ onBeforeUnmount(() => {
               <small>{{ stageSummary(stage) }}</small>
             </div>
           </div>
-          <button @click="openPipelineDebug(pipeline.id)">View</button>
+          <div class="pipeline-card-actions">
+            <button :disabled="hasPipelineIntegrityProblem" @click="openPipelineDebug(pipeline.id)">View</button>
+            <button :disabled="isActionBusy" @click="withAction('reload_pipelines', reloadPipelines)">Reload</button>
+          </div>
         </article>
       </section>
     </section>
@@ -967,7 +1025,8 @@ onBeforeUnmount(() => {
     <section v-else class="workspace">
       <header class="statusbar">
         <button @click="showPipelineIndex">Pipelines</button>
-        <span>Status: {{ debugState.status }}</span>
+        <span v-if="hasPipelineIntegrityProblem">Debugging blocked: pipeline integrity problem</span>
+        <span v-else>Status: {{ debugState.status }}</span>
         <span>Step {{ debugState.cursor ?? 0 }} / {{ debugState.total_steps ?? 0 }}</span>
       </header>
 
@@ -1278,6 +1337,36 @@ button:disabled svg {
   font-size: 13px;
 }
 
+.pipeline-integrity {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #b45309;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fffbeb;
+  color: #78350f;
+  font-size: 13px;
+}
+
+.pipeline-integrity span {
+  overflow-wrap: anywhere;
+}
+
+.workspace-integrity {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #b45309;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffbeb;
+  color: #78350f;
+  font-size: 14px;
+}
+
+.workspace-integrity span {
+  overflow-wrap: anywhere;
+}
+
 .tree-panel {
   display: grid;
   gap: 10px;
@@ -1415,7 +1504,7 @@ button:disabled svg {
 }
 
 .statusbar button,
-.pipeline-card > button {
+.pipeline-card-actions button {
   border: 1px solid #b8c2cc;
   border-radius: 6px;
   padding: 8px 10px;
@@ -1448,6 +1537,12 @@ button:disabled svg {
 
 .stage-list {
   display: grid;
+  gap: 8px;
+}
+
+.pipeline-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 

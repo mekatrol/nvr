@@ -83,6 +83,10 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 self._json({"error": str(ex)}, status=400)
             return
 
+        if parsed.path == "/api/pipelines/reload":
+            self._json(api_state.reload_pipelines())
+            return
+
         if parsed.path == "/api/logs/clear":
             api_state.clear_logs()
             self._json({"entries": []})

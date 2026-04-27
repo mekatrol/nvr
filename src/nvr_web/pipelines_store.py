@@ -27,12 +27,52 @@ class PipelinesStore:
         self.pipelines_path = self.pipelines_dir / "pipelines.yaml"
         self.deployed_path = config.get_deployed_pipelines_path()
         self.pipeline_conf_path = config.get_pipeline_config_path()
+        self._logged_missing_stage_files: set[tuple[str, str, str, str]] = set()
         self.pipelines_dir.mkdir(parents=True, exist_ok=True)
         self.deployed_dir.mkdir(parents=True, exist_ok=True)
 
     def pipeline_config_response(self) -> dict[str, Any]:
         pipelines_config = self.load_pipeline_config_pipelines()
         return self.pipelines_response(pipelines_config)
+
+    def pipeline_integrity(self) -> dict[str, Any]:
+        pipelines_config = self.load_pipeline_config_pipelines()
+        if pipelines_config.get(Config.KEY_PIPELINES_ENABLED) is False:
+            return {"ok": True, "issues": []}
+
+        try:
+            graph_config = self._expand_pipeline_config_paths(
+                pipelines_config,
+                self.pipelines_path,
+                self.pipelines_dir,
+                resolve_stage_filenames=True,
+            )
+            graph = Config._parse_pipelines(graph_config)
+            graph.validate()
+        except Exception as ex:
+            return {
+                "ok": False,
+                "issues": [{"level": "error", "message": str(ex)}],
+            }
+
+        issues: list[dict[str, str]] = []
+        for pipeline in graph.pipelines:
+            for stage in pipeline.stages:
+                if not stage.filename:
+                    continue
+                stage_path = Path(stage.filename)
+                if not stage_path.exists():
+                    issues.append(
+                        {
+                            "level": "warning",
+                            "message": (
+                                f"Pipeline {pipeline.id} stage {stage.id} "
+                                f"references missing file: {stage_path}"
+                            ),
+                        }
+                    )
+
+        return {"ok": not issues, "issues": issues}
 
     def pipeline_config_graph(self) -> PipelineGraph | None:
         pipelines_config = self.load_pipeline_config_pipelines()
@@ -143,8 +183,10 @@ class PipelinesStore:
             len(graph.pipelines),
             len(graph.edges),
         )
+        integrity = self.pipeline_integrity()
         return {
             "enabled": pipelines_config.get(Config.KEY_PIPELINES_ENABLED, True),
+            "integrity": integrity,
             "frame_interval_seconds": pipelines_config.get(
                 Config.KEY_PIPELINE_FRAME_INTERVAL_SECONDS
             ),
@@ -210,6 +252,10 @@ class PipelinesStore:
     def _log_error(self, msg: str, *args: Any) -> None:
         if self.logger is not None:
             self.logger.error(msg, *args)
+
+    def _log_warning(self, msg: str, *args: Any) -> None:
+        if self.logger is not None:
+            self.logger.warning(msg, *args)
 
     @staticmethod
     def _normalize_pipelines_config(raw_pipelines: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +335,14 @@ class PipelinesStore:
                     stage["filename"] = self._relative_path(
                         deployed_path, deployed_yaml_path
                     )
+                else:
+                    self._log_warning(
+                        "Pipeline stage file does not exist during deploy: "
+                        "yaml=%s filename=%s resolved_path=%s",
+                        source_yaml_path,
+                        filename,
+                        source_path,
+                    )
         return deployed_config
 
     def _relativize_stage_filenames(
@@ -325,10 +379,39 @@ class PipelinesStore:
                 filename = stage.get("filename")
                 if not isinstance(filename, str) or not filename:
                     continue
-                stage["filename"] = str(
-                    self._stage_path_under(filename, yaml_path, allowed_root)
-                )
+                stage_path = self._stage_path_under(filename, yaml_path, allowed_root)
+                if not stage_path.exists():
+                    self._log_missing_stage_file(
+                        yaml_path,
+                        str(pipeline.get("id", "<unknown>")),
+                        str(stage.get("id", "<unknown>")),
+                        filename,
+                        stage_path,
+                    )
+                stage["filename"] = str(stage_path)
         return config
+
+    def _log_missing_stage_file(
+        self,
+        yaml_path: Path,
+        pipeline_id: str,
+        stage_id: str,
+        filename: str,
+        stage_path: Path,
+    ) -> None:
+        key = (str(yaml_path), pipeline_id, stage_id, filename)
+        if key in self._logged_missing_stage_files:
+            return
+        self._logged_missing_stage_files.add(key)
+        self._log_warning(
+            "Pipeline stage file does not exist: "
+            "yaml=%s pipeline=%s stage=%s filename=%s resolved_path=%s",
+            yaml_path,
+            pipeline_id,
+            stage_id,
+            filename,
+            stage_path,
+        )
 
     def _expand_pipeline_config_paths(
         self,
