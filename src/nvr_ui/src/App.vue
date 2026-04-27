@@ -87,6 +87,13 @@ const materialIcons = {
   link: 'link',
   plus: 'add',
   trash: 'delete',
+  run: 'play_arrow',
+  stop: 'stop',
+  step: 'skip_next',
+  stepStage: 'step_into',
+  stepPipeline: 'account_tree',
+  breakpoint: 'radio_button_checked',
+  clearBreakpoint: 'block',
 } as const
 
 const cameras = ref<Camera[]>([])
@@ -1023,44 +1030,92 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <div class="controls">
-            <button :disabled="!canRun" @click="startRunLoop">
-              {{ isRunLoopActive ? 'Running' : 'Run' }}
-            </button>
-            <button :disabled="!canStop" @click="stopDebuggerRun">Stop</button>
-            <button :disabled="!canStep" @click="runDebuggerCommand('step')">Step</button>
-            <button :disabled="!canStep" @click="runDebuggerCommand('step_over_stage')">
-              Step Stage
-            </button>
-            <button :disabled="!canStep" @click="runDebuggerCommand('step_over_pipeline')">
-              Step Pipeline
-            </button>
-          </div>
-          <label class="field">
-            <span>Breakpoint</span>
-            <select v-model="selectedBreakpoint">
-              <option value="">None</option>
-              <template v-for="pipeline in pipelines" :key="pipeline.id">
-                <option :value="`${pipeline.id}:`">{{ pipeline.id }}</option>
-                <option
-                  v-for="stage in pipeline.stages"
-                  :key="`${pipeline.id}:${stage.id}`"
-                  :value="`${pipeline.id}:${stage.id}`"
-                >
-                  {{ pipeline.id }} / {{ stage.id }}
-                </option>
-              </template>
-            </select>
-          </label>
-          <div class="breakpoint-actions">
-            <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(true)">Set</button>
-            <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(false)">Clear</button>
-          </div>
           <p v-if="apiError" class="error">{{ apiError }}</p>
           <p v-if="deployStatus" class="status">{{ deployStatus }}</p>
         </aside>
 
         <section v-if="currentView === 'index'" class="workspace">
+          <section class="pipeline-ribbon" aria-label="Pipeline debugger controls">
+            <div class="ribbon-group">
+              <button :disabled="!canRun" title="Run" @click="startRunLoop">
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.run }}
+                </span>
+                <span>{{ isRunLoopActive ? 'Running' : 'Run' }}</span>
+              </button>
+              <button :disabled="!canStop" title="Stop" @click="stopDebuggerRun">
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.stop }}
+                </span>
+                <span>Stop</span>
+              </button>
+              <button :disabled="!canStep" title="Step" @click="runDebuggerCommand('step')">
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.step }}
+                </span>
+                <span>Step</span>
+              </button>
+              <button
+                :disabled="!canStep"
+                title="Step stage"
+                @click="runDebuggerCommand('step_over_stage')"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.stepStage }}
+                </span>
+                <span>Step Stage</span>
+              </button>
+              <button
+                :disabled="!canStep"
+                title="Step pipeline"
+                @click="runDebuggerCommand('step_over_pipeline')"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.stepPipeline }}
+                </span>
+                <span>Step Pipeline</span>
+              </button>
+            </div>
+            <div class="ribbon-group breakpoint-ribbon">
+              <label class="ribbon-field">
+                <span>Breakpoint</span>
+                <select v-model="selectedBreakpoint">
+                  <option value="">None</option>
+                  <template v-for="pipeline in pipelines" :key="pipeline.id">
+                    <option :value="`${pipeline.id}:`">{{ pipeline.id }}</option>
+                    <option
+                      v-for="stage in pipeline.stages"
+                      :key="`${pipeline.id}:${stage.id}`"
+                      :value="`${pipeline.id}:${stage.id}`"
+                    >
+                      {{ pipeline.id }} / {{ stage.id }}
+                    </option>
+                  </template>
+                </select>
+              </label>
+              <button
+                :disabled="!canSetBreakpoint"
+                title="Set breakpoint"
+                @click="toggleBreakpoint(true)"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.breakpoint }}
+                </span>
+                <span>Set</span>
+              </button>
+              <button
+                :disabled="!canSetBreakpoint"
+                title="Clear breakpoint"
+                @click="toggleBreakpoint(false)"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.clearBreakpoint }}
+                </span>
+                <span>Clear</span>
+              </button>
+            </div>
+          </section>
+
           <header class="statusbar">
             <span>Pipelines</span>
             <span>{{ pipelines.length }} configured</span>
@@ -1107,6 +1162,87 @@ onBeforeUnmount(() => {
         </section>
 
         <section v-else class="workspace">
+          <section class="pipeline-ribbon" aria-label="Pipeline debugger controls">
+            <div class="ribbon-group">
+              <button :disabled="!canRun" title="Run" @click="startRunLoop">
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.run }}
+                </span>
+                <span>{{ isRunLoopActive ? 'Running' : 'Run' }}</span>
+              </button>
+              <button :disabled="!canStop" title="Stop" @click="stopDebuggerRun">
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.stop }}
+                </span>
+                <span>Stop</span>
+              </button>
+              <button :disabled="!canStep" title="Step" @click="runDebuggerCommand('step')">
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.step }}
+                </span>
+                <span>Step</span>
+              </button>
+              <button
+                :disabled="!canStep"
+                title="Step stage"
+                @click="runDebuggerCommand('step_over_stage')"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.stepStage }}
+                </span>
+                <span>Step Stage</span>
+              </button>
+              <button
+                :disabled="!canStep"
+                title="Step pipeline"
+                @click="runDebuggerCommand('step_over_pipeline')"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.stepPipeline }}
+                </span>
+                <span>Step Pipeline</span>
+              </button>
+            </div>
+            <div class="ribbon-group breakpoint-ribbon">
+              <label class="ribbon-field">
+                <span>Breakpoint</span>
+                <select v-model="selectedBreakpoint">
+                  <option value="">None</option>
+                  <template v-for="pipeline in pipelines" :key="pipeline.id">
+                    <option :value="`${pipeline.id}:`">{{ pipeline.id }}</option>
+                    <option
+                      v-for="stage in pipeline.stages"
+                      :key="`${pipeline.id}:${stage.id}`"
+                      :value="`${pipeline.id}:${stage.id}`"
+                    >
+                      {{ pipeline.id }} / {{ stage.id }}
+                    </option>
+                  </template>
+                </select>
+              </label>
+              <button
+                :disabled="!canSetBreakpoint"
+                title="Set breakpoint"
+                @click="toggleBreakpoint(true)"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.breakpoint }}
+                </span>
+                <span>Set</span>
+              </button>
+              <button
+                :disabled="!canSetBreakpoint"
+                title="Clear breakpoint"
+                @click="toggleBreakpoint(false)"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">
+                  {{ materialIcons.clearBreakpoint }}
+                </span>
+                <span>Clear</span>
+              </button>
+            </div>
+          </section>
+
           <header class="statusbar">
             <button @click="showPipelineIndex">Pipelines</button>
             <span v-if="hasPipelineIntegrityProblem"
@@ -1549,7 +1685,8 @@ button:disabled .material-symbols-outlined {
 }
 
 .tree-panel .material-symbols-outlined,
-.tree-row .material-symbols-outlined {
+.tree-row .material-symbols-outlined,
+.pipeline-ribbon .material-symbols-outlined {
   width: 16px;
   overflow: hidden;
   height: 16px;
@@ -1625,15 +1762,6 @@ button:disabled .material-symbols-outlined {
   font-size: 13px;
 }
 
-.controls,
-.breakpoint-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.controls button,
-.breakpoint-actions button,
 .refresh-button,
 .stage-row {
   border: 1px solid #b8c2cc;
@@ -1642,6 +1770,60 @@ button:disabled .material-symbols-outlined {
   background: #ffffff;
   color: #1f2933;
   cursor: pointer;
+}
+
+.pipeline-ribbon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.ribbon-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ribbon-group button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: #ffffff;
+  color: #1f2933;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.breakpoint-ribbon {
+  justify-content: flex-end;
+}
+
+.ribbon-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #394b5f;
+  font-size: 13px;
+}
+
+.ribbon-field select {
+  min-width: 220px;
+  max-width: 320px;
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #ffffff;
+  color: #1f2933;
 }
 
 .workspace {
@@ -2071,6 +2253,25 @@ button:disabled .material-symbols-outlined {
   .app-sidebar {
     position: static;
     height: auto;
+  }
+
+  .pipeline-ribbon {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .breakpoint-ribbon {
+    justify-content: flex-start;
+  }
+
+  .ribbon-field {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ribbon-field select {
+    width: 100%;
+    max-width: none;
   }
 
   .vscode-header {
