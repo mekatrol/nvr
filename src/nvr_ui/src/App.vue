@@ -100,10 +100,11 @@ const vscodeLoadFailed = ref(false)
 const runLoopTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const isRunLoopActive = ref(false)
 const isRunLoopTicking = ref(false)
+const currentAction = ref('')
 const vscodeWebUrl = computed(
   () =>
     import.meta.env.VITE_VSCODE_WEB_URL ||
-    'http://127.0.0.1:8000/?folder=/home/dad/nvr/pipelines',
+    'http://127.0.0.1:8000/?folder=/home/dad/nvr/pipelines/draft',
 )
 const isEditorRoute = computed(() => route.path === '/editor')
 
@@ -124,6 +125,29 @@ const selectedDraftPipeline = computed(() =>
 
 const selectedDraftStage = computed(() =>
   selectedDraftPipeline.value?.stages.find((stage) => stage.id === selectedStageId.value),
+)
+
+const isActionBusy = computed(() => currentAction.value.length > 0)
+const hasSelectedCamera = computed(() => selectedCameraId.value.length > 0)
+const hasDraftPipeline = computed(() => Boolean(selectedDraftPipeline.value))
+const hasDraftStage = computed(() => Boolean(selectedDraftStage.value))
+const canRun = computed(
+  () => hasSelectedCamera.value && !isRunLoopActive.value && !isActionBusy.value,
+)
+const canStop = computed(() => isRunLoopActive.value && !isActionBusy.value)
+const canStep = computed(
+  () => hasSelectedCamera.value && !isRunLoopActive.value && !isActionBusy.value,
+)
+const canEditDraft = computed(() => !isRunLoopActive.value && !isActionBusy.value)
+const canApplyPipeline = computed(() => canEditDraft.value && hasDraftPipeline.value)
+const canApplyStage = computed(() => canEditDraft.value && hasDraftStage.value)
+const canAddEdge = computed(() => canEditDraft.value && draftPipelines.value.length >= 2)
+const canSetBreakpoint = computed(
+  () =>
+    hasSelectedCamera.value &&
+    selectedBreakpoint.value.length > 0 &&
+    !isRunLoopActive.value &&
+    !isActionBusy.value,
 )
 
 async function loadCameras() {
@@ -184,8 +208,18 @@ async function runCommand(command: string) {
   await loadDebugState()
 }
 
+async function runDebuggerCommand(command: string) {
+  if (isActionBusy.value) return
+  await withAction(command, () => runCommand(command))
+}
+
+async function stopDebuggerRun() {
+  if (!canStop.value) return
+  await withAction('stop', () => stopRunLoop())
+}
+
 async function startRunLoop() {
-  if (isRunLoopActive.value) return
+  if (isRunLoopActive.value || isActionBusy.value) return
   isRunLoopActive.value = true
   try {
     await runLoopTick()
@@ -228,14 +262,19 @@ async function stopRunLoop(sendPause = true) {
 }
 
 async function toggleBreakpoint(enabled: boolean) {
-  if (!selectedCameraId.value || !selectedBreakpoint.value) return
-  const [pipelineId, stageId] = selectedBreakpoint.value.split(':')
-  debugState.value = await postJson<DebugState>('/api/debug/breakpoints', {
-    camera_id: selectedCameraId.value,
-    pipeline_id: pipelineId,
-    stage_id: stageId || null,
-    enabled,
-  })
+  if (isActionBusy.value || !selectedCameraId.value || !selectedBreakpoint.value) return
+  currentAction.value = enabled ? 'set_breakpoint' : 'clear_breakpoint'
+  try {
+    const [pipelineId, stageId] = selectedBreakpoint.value.split(':')
+    debugState.value = await postJson<DebugState>('/api/debug/breakpoints', {
+      camera_id: selectedCameraId.value,
+      pipeline_id: pipelineId,
+      stage_id: stageId || null,
+      enabled,
+    })
+  } finally {
+    currentAction.value = ''
+  }
 }
 
 async function refreshCamera() {
@@ -262,6 +301,16 @@ async function saveDraftPipelines() {
   draftEdges.value = saved.edges
   refreshSelectedEditors()
   deployStatus.value = 'Draft saved'
+}
+
+async function withAction<T>(action: string, task: () => Promise<T>): Promise<T | undefined> {
+  if (isActionBusy.value) return undefined
+  currentAction.value = action
+  try {
+    return await task()
+  } finally {
+    currentAction.value = ''
+  }
 }
 
 async function deployDraftPipelines() {
@@ -453,7 +502,8 @@ function applyPipelineEdits() {
   selectedPipelineId.value = nextId
 }
 
-function applyStageEdits() {
+async function applyStageEdits() {
+  if (isActionBusy.value) return
   const stage = selectedDraftStage.value
   if (!stage) return
   const nextId = selectedStageIdEdit.value.trim()
@@ -471,6 +521,20 @@ function applyStageEdits() {
   stage.filename = selectedStageFilename.value.trim() || undefined
   stage.pipeline = selectedStagePipeline.value.trim() || undefined
   selectedStageId.value = nextId
+  currentAction.value = 'apply_stage'
+  try {
+    await stopRunLoop(false)
+    await saveDraftPipelines()
+    await loadPipelines()
+    if (selectedCameraId.value) {
+      await runCommand('run')
+    } else {
+      await loadDebugState()
+    }
+    deployStatus.value = 'Stage applied and debugger refreshed'
+  } finally {
+    currentAction.value = ''
+  }
 }
 
 function addEdge() {
@@ -622,8 +686,8 @@ onBeforeUnmount(() => {
         <span>pipeline_conf.yaml and Python stage files</span>
       </div>
       <nav>
-        <button @click="generateExampleResizePipeline">Example Resize</button>
-        <button @click="deployDraftFromEditor">Deploy Draft</button>
+        <button :disabled="!canEditDraft" @click="withAction('example_resize', generateExampleResizePipeline)">Example Resize</button>
+        <button :disabled="!canEditDraft" @click="withAction('deploy_draft', deployDraftFromEditor)">Deploy Draft</button>
         <RouterLink to="/">Debugger</RouterLink>
         <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
       </nav>
@@ -641,7 +705,7 @@ onBeforeUnmount(() => {
       ></iframe>
       <div v-if="vscodeLoadFailed" class="vscode-error">
         <strong>VS Code Web is not available.</strong>
-        <span>Start it with code serve-web on port 8000, then reload this view.</span>
+        <span>Start it with code serve-web --host 127.0.0.1 --port 8000 --without-connection-token --accept-server-license-terms --default-folder /home/dad/nvr/pipelines, then reload this view.</span>
       </div>
     </section>
   </main>
@@ -663,7 +727,13 @@ onBeforeUnmount(() => {
           </option>
         </select>
       </label>
-      <button class="refresh-button" @click="loadCameras().then(refreshCamera)">Refresh Cameras</button>
+      <button
+        class="refresh-button"
+        :disabled="isActionBusy || isRunLoopActive"
+        @click="withAction('refresh_cameras', () => loadCameras().then(refreshCamera))"
+      >
+        Refresh Cameras
+      </button>
       <div class="camera-state">
         <span>{{ selectedCamera?.enabled ? 'Recorder enabled' : 'Recorder disabled' }}</span>
         <span>{{ selectedCamera?.pipeline_enabled ? 'Pipeline enabled' : 'Pipeline disabled' }}</span>
@@ -672,7 +742,7 @@ onBeforeUnmount(() => {
       <section class="tree-panel">
         <header>
           <strong>Pipeline Tree</strong>
-          <button title="Add pipeline" @click="addPipelineFromTree">
+          <button title="Add pipeline" :disabled="!canEditDraft" @click="addPipelineFromTree">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path :d="iconPaths.plus" />
             </svg>
@@ -693,12 +763,12 @@ onBeforeUnmount(() => {
                 </svg>
               </span>
               <span class="tree-label">{{ pipeline.name || pipeline.id }}</span>
-              <button title="Add stage" @click.stop="addStageToPipeline(pipeline.id)">
+              <button title="Add stage" :disabled="!canEditDraft" @click.stop="addStageToPipeline(pipeline.id)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="iconPaths.plus" />
                 </svg>
               </button>
-              <button title="Remove pipeline" @click.stop="deletePipeline(pipeline.id)">
+              <button title="Remove pipeline" :disabled="!canEditDraft" @click.stop="deletePipeline(pipeline.id)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="iconPaths.trash" />
                 </svg>
@@ -719,7 +789,7 @@ onBeforeUnmount(() => {
                   </svg>
                 </span>
                 <span class="tree-label">{{ stage.id }}</span>
-                <button title="Remove stage" @click.stop="deleteStage(pipeline.id, stage.id)">
+                <button title="Remove stage" :disabled="!canEditDraft" @click.stop="deleteStage(pipeline.id, stage.id)">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="iconPaths.trash" />
                   </svg>
@@ -731,11 +801,11 @@ onBeforeUnmount(() => {
       </section>
 
       <div class="controls">
-        <button @click="startRunLoop">{{ isRunLoopActive ? 'Running' : 'Run' }}</button>
-        <button @click="stopRunLoop()">Stop</button>
-        <button @click="runCommand('step')">Step</button>
-        <button @click="runCommand('step_over_stage')">Step Stage</button>
-        <button @click="runCommand('step_over_pipeline')">Step Pipeline</button>
+        <button :disabled="!canRun" @click="startRunLoop">{{ isRunLoopActive ? 'Running' : 'Run' }}</button>
+        <button :disabled="!canStop" @click="stopDebuggerRun">Stop</button>
+        <button :disabled="!canStep" @click="runDebuggerCommand('step')">Step</button>
+        <button :disabled="!canStep" @click="runDebuggerCommand('step_over_stage')">Step Stage</button>
+        <button :disabled="!canStep" @click="runDebuggerCommand('step_over_pipeline')">Step Pipeline</button>
       </div>
       <label class="field">
         <span>Breakpoint</span>
@@ -754,8 +824,8 @@ onBeforeUnmount(() => {
         </select>
       </label>
       <div class="breakpoint-actions">
-        <button @click="toggleBreakpoint(true)">Set</button>
-        <button @click="toggleBreakpoint(false)">Clear</button>
+        <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(true)">Set</button>
+        <button :disabled="!canSetBreakpoint" @click="toggleBreakpoint(false)">Clear</button>
       </div>
       <p v-if="apiError" class="error">{{ apiError }}</p>
       <p v-if="deployStatus" class="status">{{ deployStatus }}</p>
@@ -811,9 +881,9 @@ onBeforeUnmount(() => {
         <header class="editor-header">
           <strong>Pipeline Draft</strong>
           <div class="editor-actions">
-            <button @click="loadDraftPipelines">Reload Draft</button>
-            <button @click="saveDraftPipelines">Save Draft</button>
-            <button @click="deployDraftPipelines">Deploy</button>
+            <button :disabled="!canEditDraft" @click="withAction('reload_draft', loadDraftPipelines)">Reload Draft</button>
+            <button :disabled="!canEditDraft" @click="withAction('save_draft', saveDraftPipelines)">Save Draft</button>
+            <button :disabled="!canEditDraft" @click="withAction('deploy_draft', deployDraftPipelines)">Deploy</button>
           </div>
         </header>
 
@@ -821,7 +891,7 @@ onBeforeUnmount(() => {
           <section class="editor-panel">
             <header>
               <strong>Pipelines</strong>
-              <button @click="addPipeline">Add</button>
+              <button :disabled="!canEditDraft" @click="addPipeline">Add</button>
             </header>
             <label class="inline-field">
               <span>Enabled</span>
@@ -846,7 +916,7 @@ onBeforeUnmount(() => {
           <section class="editor-panel">
             <header>
               <strong>Pipeline</strong>
-              <button @click="deleteSelectedPipeline">Delete</button>
+              <button :disabled="!canApplyPipeline" @click="deleteSelectedPipeline">Delete</button>
             </header>
             <label class="field light">
               <span>ID</span>
@@ -864,11 +934,11 @@ onBeforeUnmount(() => {
               <span>Required inputs</span>
               <input v-model="selectedPipelineRequiredInputs" type="text" />
             </label>
-            <button @click="applyPipelineEdits">Apply Pipeline</button>
+            <button :disabled="!canApplyPipeline" @click="applyPipelineEdits">Apply Pipeline</button>
 
             <header>
               <strong>Stages</strong>
-              <button @click="addStage">Add</button>
+              <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
             </header>
             <button
               v-for="stage in selectedDraftPipeline?.stages ?? []"
@@ -885,7 +955,7 @@ onBeforeUnmount(() => {
           <section class="editor-panel">
             <header>
               <strong>Stage</strong>
-              <button @click="deleteSelectedStage">Delete</button>
+              <button :disabled="!canApplyStage" @click="deleteSelectedStage">Delete</button>
             </header>
             <label class="field light">
               <span>ID</span>
@@ -920,13 +990,13 @@ onBeforeUnmount(() => {
               <span>Config JSON</span>
               <textarea v-model="selectedStageConfigJson" rows="8"></textarea>
             </label>
-            <button @click="applyStageEdits">Apply Stage</button>
+            <button :disabled="!canApplyStage" @click="applyStageEdits">Apply Stage</button>
           </section>
 
           <section class="editor-panel">
             <header>
               <strong>Edges</strong>
-              <button @click="addEdge">Add</button>
+              <button :disabled="!canAddEdge" @click="addEdge">Add</button>
             </header>
             <div v-for="(edge, index) in draftEdges" :key="index" class="edge-row">
               <select v-model="edge.from">
@@ -939,7 +1009,7 @@ onBeforeUnmount(() => {
                   {{ pipeline.id }}
                 </option>
               </select>
-              <button @click="deleteEdge(index)">Delete</button>
+              <button :disabled="!canEditDraft" @click="deleteEdge(index)">Delete</button>
             </div>
           </section>
         </div>
@@ -996,6 +1066,18 @@ select,
 input,
 textarea {
   font: inherit;
+}
+
+button:disabled {
+  border-color: #cbd5df;
+  background: #eef2f6;
+  color: #718096;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button:disabled svg {
+  opacity: 0.75;
 }
 
 .shell {
