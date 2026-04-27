@@ -69,6 +69,13 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 self._json({"error": str(ex)}, status=400)
             return
 
+        if parsed.path == "/api/pipelines/examples/resize":
+            try:
+                self._json(api_state.generate_example_resize_pipeline())
+            except ValueError as ex:
+                self._json({"error": str(ex)}, status=400)
+            return
+
         if parsed.path == "/api/debug/breakpoints":
             body = self._read_json()
             session = api_state.session(body.get("camera_id", ""))

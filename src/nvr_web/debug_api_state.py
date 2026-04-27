@@ -84,6 +84,9 @@ class DebugApiState:
         self.reload_config()
         return response
 
+    def generate_example_resize_pipeline(self) -> dict[str, Any]:
+        return self.pipelines_store.generate_example_resize_pipeline()
+
     def reload_config(self) -> None:
         self.config = Config()
         self.pipelines_store = PipelinesStore(self.config)

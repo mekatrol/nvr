@@ -66,6 +66,8 @@ class DebugApiTest(unittest.TestCase):
             self._config(temp_path)
 
             self.assertTrue((temp_path / "pipelines").is_dir())
+            self.assertTrue((temp_path / "pipelines" / "draft").is_dir())
+            self.assertTrue((temp_path / "pipelines" / "deployed").is_dir())
 
     def test_pipeline_draft_save_does_not_modify_deployed_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -91,7 +93,7 @@ class DebugApiTest(unittest.TestCase):
 
             config_data = yaml.safe_load((temp_path / "config.yaml").read_text())
             draft_data = yaml.safe_load(
-                (temp_path / "pipelines" / "pipelines.draft.yaml").read_text()
+                (temp_path / "pipelines" / "draft" / "pipelines.yaml").read_text()
             )
 
             self.assertEqual(200, save_handler.status)
@@ -109,6 +111,18 @@ class DebugApiTest(unittest.TestCase):
             state = DebugApiState(config, FakeFrameSource)
             TestableDebugApiHandler.api_state = state
             self.assertIsNotNone(state.session("driveway"))
+            draft_stage_path = temp_path / "pipelines" / "draft" / "custom_stage.py"
+            draft_stage_path.write_text(
+                "from nvr_common.pipeline import PipelineStageResult\n"
+                "\n"
+                "class CustomStage:\n"
+                "    def __init__(self, config):\n"
+                "        self.config = config\n"
+                "\n"
+                "    def process(self, context):\n"
+                "        return PipelineStageResult(output_image=context.current_image)\n",
+                encoding="utf-8",
+            )
 
             save_handler = TestableDebugApiHandler(
                 "/api/pipelines/draft",
@@ -121,7 +135,15 @@ class DebugApiTest(unittest.TestCase):
                             {
                                 "id": "deployed-pipeline",
                                 "enabled": True,
-                                "stages": [],
+                                "stages": [
+                                    {
+                                        "id": "custom",
+                                        "enabled": True,
+                                        "filename": str(draft_stage_path),
+                                        "class": "CustomStage",
+                                        "config": {},
+                                    }
+                                ],
                             }
                         ],
                         "edges": [],
@@ -138,9 +160,10 @@ class DebugApiTest(unittest.TestCase):
             pipelines = json.loads(pipelines_handler.wfile.getvalue().decode("utf-8"))
             deployed_data = yaml.safe_load(
                 (
-                    temp_path / "pipelines" / "pipelines.deployed.yaml"
+                    temp_path / "pipelines" / "deployed" / "pipelines.yaml"
                 ).read_text()
             )
+            deployed_stage_path = temp_path / "pipelines" / "deployed" / "custom_stage.py"
 
             self.assertEqual(200, deploy_handler.status)
             self.assertEqual(
@@ -150,8 +173,61 @@ class DebugApiTest(unittest.TestCase):
                 "deployed-pipeline",
                 deployed_data["pipelines"][0]["id"],
             )
+            self.assertTrue(deployed_stage_path.is_file())
+            self.assertEqual(
+                str(deployed_stage_path),
+                deployed_data["pipelines"][0]["stages"][0]["filename"],
+            )
             self.assertEqual("deployed-pipeline", pipelines["pipelines"][0]["id"])
             self.assertEqual({}, state.sessions)
+
+    def test_generate_example_resize_pipeline_writes_to_pipeline_storage(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            TestableDebugApiHandler.api_state = DebugApiState(config, FakeFrameSource)
+
+            handler = TestableDebugApiHandler("/api/pipelines/examples/resize")
+            handler.do_POST()
+
+            response = json.loads(handler.wfile.getvalue().decode("utf-8"))
+            draft_path = temp_path / "pipelines" / "draft" / "pipelines.yaml"
+            stage_path = temp_path / "pipelines" / "draft" / "example_resize_stage.py"
+            deployed_path = temp_path / "pipelines" / "deployed" / "pipelines.yaml"
+            deployed_stage_path = (
+                temp_path / "pipelines" / "deployed" / "example_resize_stage.py"
+            )
+            draft_data = yaml.safe_load(draft_path.read_text(encoding="utf-8"))
+            response_pipeline = next(
+                pipeline
+                for pipeline in response["pipelines"]
+                if pipeline["id"] == "example-resize"
+            )
+            draft_pipeline = next(
+                pipeline
+                for pipeline in draft_data["pipelines"]
+                if pipeline["id"] == "example-resize"
+            )
+
+            self.assertEqual(200, handler.status)
+            self.assertTrue(stage_path.is_file())
+            self.assertFalse(deployed_path.exists())
+            self.assertFalse(deployed_stage_path.exists())
+            self.assertEqual("example-resize", response_pipeline["id"])
+            self.assertTrue(
+                any(
+                    pipeline["id"] == "preprocessing"
+                    for pipeline in draft_data["pipelines"]
+                )
+            )
+            self.assertEqual(
+                str(stage_path),
+                draft_pipeline["stages"][0]["filename"],
+            )
+            self.assertEqual(
+                {"output_width": 640, "output_height": 360},
+                draft_pipeline["stages"][0]["config"],
+            )
 
     def _config(self, temp_path):
         config_path = temp_path / "config.yaml"

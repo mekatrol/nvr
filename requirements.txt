@@ -1,4 +1,5 @@
 pyyaml
 ruff
+pytest
 opencv-python-headless
 paho-mqtt

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 
 type Camera = {
   id: string
@@ -93,6 +94,14 @@ const selectedStagePipeline = ref('')
 const selectedStageConfigJson = ref('{}')
 const selectedPipelineRequiredInputs = ref('')
 const deployStatus = ref('')
+const route = useRoute()
+const vscodeLoadFailed = ref(false)
+const vscodeWebUrl = computed(
+  () =>
+    import.meta.env.VITE_VSCODE_WEB_URL ||
+    'http://127.0.0.1:8000/?folder=/home/dad/nvr/pipelines',
+)
+const isEditorRoute = computed(() => route.path === '/editor')
 
 const selectedCamera = computed(() =>
   cameras.value.find((camera) => camera.id === selectedCameraId.value),
@@ -212,6 +221,16 @@ async function deployDraftPipelines() {
   edges.value = deployed.edges
   await loadDebugState()
   deployStatus.value = 'Draft deployed and server config reloaded'
+}
+
+async function generateExampleResizePipeline() {
+  const generated = await postJson<PipelinesResponse>('/api/pipelines/examples/resize', {})
+  draftEnabled.value = generated.enabled
+  draftFrameIntervalSeconds.value = String(generated.frame_interval_seconds ?? '1.0')
+  draftPipelines.value = generated.pipelines
+  draftEdges.value = generated.edges
+  selectPipeline('example-resize')
+  deployStatus.value = 'Example resize pipeline generated as draft'
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -521,9 +540,43 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="shell">
+  <main v-if="isEditorRoute" class="vscode-shell">
+    <header class="vscode-header">
+      <div>
+        <strong>NVR Editor</strong>
+        <span>pipeline_conf.yaml and Python stage files</span>
+      </div>
+      <nav>
+        <button @click="generateExampleResizePipeline">Example Resize</button>
+        <RouterLink to="/">Debugger</RouterLink>
+        <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
+      </nav>
+    </header>
+    <section class="vscode-stage">
+      <p v-if="apiError" class="vscode-message error">{{ apiError }}</p>
+      <p v-if="deployStatus" class="vscode-message status">{{ deployStatus }}</p>
+      <iframe
+        class="vscode-frame"
+        :src="vscodeWebUrl"
+        title="VS Code Web editor"
+        allow="clipboard-read; clipboard-write"
+        @load="vscodeLoadFailed = false"
+        @error="vscodeLoadFailed = true"
+      ></iframe>
+      <div v-if="vscodeLoadFailed" class="vscode-error">
+        <strong>VS Code Web is not available.</strong>
+        <span>Start it with code serve-web on port 8000, then reload this view.</span>
+      </div>
+    </section>
+  </main>
+
+  <main v-else class="shell">
     <aside class="sidebar">
       <div class="brand">NVR Debugger</div>
+      <nav class="sidebar-nav">
+        <RouterLink to="/">Debugger</RouterLink>
+        <RouterLink to="/editor">Editor</RouterLink>
+      </nav>
       <label class="field">
         <span>Camera</span>
         <select v-model="selectedCameraId" @change="refreshCamera">
@@ -887,6 +940,28 @@ textarea {
 .brand {
   font-size: 20px;
   font-weight: 700;
+}
+
+.sidebar-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-nav a,
+.vscode-header a,
+.vscode-header button {
+  border: 1px solid #506070;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #223044;
+  color: #f7fafc;
+  text-decoration: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sidebar-nav a.router-link-active {
+  background: #26364a;
 }
 
 .field {
@@ -1272,11 +1347,94 @@ textarea {
   color: #bbf7d0;
 }
 
+.vscode-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  background: #101820;
+}
+
+.vscode-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #304157;
+  padding: 12px 16px;
+  background: #18222f;
+  color: #f7fafc;
+}
+
+.vscode-header div {
+  display: grid;
+  gap: 2px;
+}
+
+.vscode-header span {
+  color: #cbd5df;
+  font-size: 13px;
+}
+
+.vscode-header nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vscode-message {
+  position: absolute;
+  z-index: 2;
+  inset: 12px auto auto 12px;
+  margin: 0;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  background: #18222f;
+}
+
+.vscode-stage {
+  position: relative;
+  display: grid;
+  min-height: 0;
+}
+
+.vscode-frame {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  background: #1e1e1e;
+}
+
+.vscode-error {
+  position: absolute;
+  inset: 16px auto auto 16px;
+  display: grid;
+  gap: 4px;
+  max-width: min(520px, calc(100% - 32px));
+  border: 1px solid #b45309;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffbeb;
+  color: #78350f;
+  box-shadow: 0 12px 24px rgb(15 23 42 / 18%);
+}
+
+.vscode-error span {
+  font-size: 13px;
+}
+
 @media (max-width: 820px) {
   .shell,
   .details,
   .editor-grid {
     grid-template-columns: 1fr;
+  }
+
+  .vscode-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

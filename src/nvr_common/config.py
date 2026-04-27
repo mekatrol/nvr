@@ -100,7 +100,10 @@ class Config(Singleton, MutableMapping):
 
         # Validate the loaded configuration
         self._validate()
-        self.get_pipelines_storage_path().mkdir(parents=True, exist_ok=True)
+        pipelines_storage_path = self.get_pipelines_storage_path()
+        pipelines_storage_path.mkdir(parents=True, exist_ok=True)
+        (pipelines_storage_path / "draft").mkdir(parents=True, exist_ok=True)
+        (pipelines_storage_path / "deployed").mkdir(parents=True, exist_ok=True)
 
     def get_camera(self, camera_id: str) -> Dict[str, Any]:
         return self.cameras_by_id[camera_id]
@@ -117,7 +120,7 @@ class Config(Singleton, MutableMapping):
         return path
 
     def get_deployed_pipelines_path(self) -> Path:
-        return self.get_pipelines_storage_path() / "pipelines.deployed.yaml"
+        return self.get_pipelines_storage_path() / "deployed" / "pipelines.yaml"
 
     def get_pipeline_config_path(self) -> Path:
         return Path(self.config_path).with_name(self.KEY_PIPELINES_CONFIG_FILENAME)
