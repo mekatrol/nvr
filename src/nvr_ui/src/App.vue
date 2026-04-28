@@ -186,6 +186,15 @@ const isActionBusy = computed(() => currentAction.value.length > 0)
 const hasSelectedCamera = computed(() => selectedCameraId.value.length > 0)
 const hasPipelinesPipeline = computed(() => Boolean(selectedPipelinesPipeline.value))
 const hasPipelinesStage = computed(() => Boolean(selectedPipelinesStage.value))
+const isSelectedMaskStage = computed(() => {
+  const stage = selectedPipelinesStage.value
+  if (!stage) return false
+  return (
+    stage.class_name === 'MaskStage' ||
+    stage.module === 'nvr_common.pipeline.sample_stages.mask_stage' ||
+    Boolean(stage.filename?.endsWith('mask_stage.py'))
+  )
+})
 const canRun = computed(
   () =>
     hasSelectedCamera.value &&
@@ -209,13 +218,16 @@ const maskPreviewShape = computed(
 )
 const maskFrameWidth = computed(() => maskPreviewShape.value?.[1] ?? 0)
 const maskFrameHeight = computed(() => maskPreviewShape.value?.[0] ?? 0)
-const canEditMask = computed(
+const canDraftMask = computed(
   () =>
-    canApplyStage.value &&
+    hasPipelinesStage.value &&
+    isSelectedMaskStage.value &&
     Boolean(latestRecord.value?.output_preview) &&
     maskFrameWidth.value > 0 &&
     maskFrameHeight.value > 0,
 )
+const canEditMask = computed(() => canDraftMask.value && canApplyStage.value)
+const hasMaskDraftArea = computed(() => polygonArea(maskDraftPolygon.value) > 0)
 const maskPolygons = computed(() => readMaskPolygons())
 const canSetBreakpoint = computed(
   () =>
@@ -572,7 +584,7 @@ function addMaskStage() {
   selectedPipelinesPipeline.value.stages.push({
     id: baseId,
     enabled: true,
-    filename: 'nvr_common/pipeline/sample_stages/mask_stage.py',
+    module: 'nvr_common.pipeline.sample_stages.mask_stage',
     class_name: 'MaskStage',
     config: { polygons: [] },
   })
@@ -748,7 +760,7 @@ function isYamlPath(path: string) {
 }
 
 function handleMaskPreviewClick(event: MouseEvent) {
-  if (!canEditMask.value) return
+  if (!canDraftMask.value) return
   const image = maskPreviewImage.value
   if (!image) return
   const rect = image.getBoundingClientRect()
@@ -761,7 +773,7 @@ function handleMaskPreviewClick(event: MouseEvent) {
 }
 
 function closeMaskPolygon() {
-  if (maskDraftPolygon.value.length < 3) return
+  if (!hasMaskDraftArea.value) return
   updateMaskConfig([...maskPolygons.value, [...maskDraftPolygon.value]])
   maskDraftPolygon.value = []
 }
@@ -822,6 +834,17 @@ function normalizeMaskPoint(value: unknown): MaskPoint | null {
 
 function maskPolygonPoints(polygon: MaskPoint[]) {
   return polygon.map((point) => `${point.x},${point.y}`).join(' ')
+}
+
+function polygonArea(polygon: MaskPoint[]) {
+  if (polygon.length < 3) return 0
+  let area = 0
+  for (let index = 0; index < polygon.length; index += 1) {
+    const current = polygon[index]!
+    const next = polygon[(index + 1) % polygon.length]!
+    area += current.x * next.y - next.x * current.y
+  }
+  return Math.abs(area) / 2
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -1533,19 +1556,19 @@ onBeforeUnmount(() => {
                 </label>
                 <div class="mask-controls">
                   <button
-                    :disabled="!canEditMask || maskDraftPolygon.length < 3"
+                    :disabled="!canDraftMask || !hasMaskDraftArea"
                     @click="closeMaskPolygon"
                   >
                     Close Polygon
                   </button>
                   <button
-                    :disabled="!canEditMask || maskDraftPolygon.length === 0"
+                    :disabled="!canDraftMask || maskDraftPolygon.length === 0"
                     @click="undoMaskPoint"
                   >
                     Undo Point
                   </button>
                   <button
-                    :disabled="!canEditMask || maskDraftPolygon.length === 0"
+                    :disabled="!canDraftMask || maskDraftPolygon.length === 0"
                     @click="clearMaskDraft"
                   >
                     Clear Draft
@@ -1572,7 +1595,7 @@ onBeforeUnmount(() => {
                 <div
                   v-if="latestRecord?.output_preview"
                   class="mask-preview-frame"
-                  :class="{ editable: canEditMask }"
+                  :class="{ editable: canDraftMask }"
                 >
                   <img
                     ref="maskPreviewImage"
@@ -1592,6 +1615,24 @@ onBeforeUnmount(() => {
                       :key="`mask-${index}`"
                       :points="maskPolygonPoints(polygon)"
                       class="mask-polygon"
+                    />
+                    <template
+                      v-for="(polygon, polygonIndex) in maskPolygons"
+                      :key="`points-${polygonIndex}`"
+                    >
+                      <circle
+                        v-for="(point, pointIndex) in polygon"
+                        :key="`point-${polygonIndex}-${pointIndex}`"
+                        :cx="point.x"
+                        :cy="point.y"
+                        :r="Math.max(3, Math.round(maskFrameWidth / 160))"
+                        class="mask-polygon-point"
+                      />
+                    </template>
+                    <polygon
+                      v-if="hasMaskDraftArea"
+                      :points="maskPolygonPoints(maskDraftPolygon)"
+                      class="mask-draft-polygon"
                     />
                     <polyline
                       v-if="maskDraftPolygon.length > 0"
@@ -2191,10 +2232,15 @@ button:disabled .material-symbols-outlined {
 }
 
 .mask-polygon {
-  fill: rgb(0 0 0 / 48%);
+  fill: rgb(0 0 0 / 30%);
   stroke: #f59e0b;
   stroke-width: 3;
   vector-effect: non-scaling-stroke;
+}
+
+.mask-draft-polygon {
+  fill: rgb(0 0 0 / 30%);
+  stroke: none;
 }
 
 .mask-draft-line {
@@ -2204,6 +2250,7 @@ button:disabled .material-symbols-outlined {
   vector-effect: non-scaling-stroke;
 }
 
+.mask-polygon-point,
 .mask-draft-point {
   fill: #38bdf8;
   stroke: #0f172a;
