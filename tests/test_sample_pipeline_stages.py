@@ -114,6 +114,32 @@ class SamplePipelineStagesTest(unittest.TestCase):
             output.metadata["mask"],
         )
 
+    def test_mask_stage_without_polygons_preserves_image(self):
+        image = np.full((6, 6, 3), 255, dtype=np.uint8)
+        graph = PipelineGraph(
+            pipelines=(
+                NamedPipeline(
+                    id="masked",
+                    stages=(
+                        PipelineStageConfig(
+                            id="mask",
+                            module="nvr_common.pipeline.sample_stages.mask_stage",
+                            class_name="MaskStage",
+                            config={"polygons": []},
+                        ),
+                    ),
+                ),
+            )
+        )
+
+        outputs = PipelineGraphRunner(graph).run(
+            camera_id="driveway", frame_id="frame-1", image=image
+        )
+
+        output = outputs["masked"]
+        np.testing.assert_array_equal(output.output_image, image)
+        self.assertEqual({"polygons": []}, output.metadata["mask"])
+
     def test_sample_graph_runs_ordered_pipelines_and_skips_disabled_stage(self):
         image = self._image(width=10, height=8)
         graph = PipelineGraph(

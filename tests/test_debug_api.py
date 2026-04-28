@@ -45,7 +45,7 @@ class DebugApiTest(unittest.TestCase):
             state_handler = TestableDebugApiHandler(
                 "/api/debug/command",
                 method="POST",
-                body=json.dumps({"camera_id": "driveway", "command": "run"}).encode(
+                body=json.dumps({"camera_id": "driveway", "command": "step"}).encode(
                     "utf-8"
                 ),
             )
@@ -448,6 +448,75 @@ class DebugApiTest(unittest.TestCase):
                 deployed_child["pipelines"][0]["stages"][0]["filename"],
             )
             self.assertTrue((temp_path / "pipeline_config" / "deployed" / "resize_stage.py").is_file())
+
+    def test_pipeline_config_save_can_update_selected_yaml_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config = self._config(temp_path)
+            TestableDebugApiHandler.api_state = DebugApiState(config, FakeFrameSource)
+            pipelines_dir = temp_path / "pipeline_config" / "pipelines"
+            child_yaml_path = pipelines_dir / "preprocessors" / "mask-pipeline.yaml"
+            child_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            (pipelines_dir / "pipelines.yaml").write_text(
+                "pipelines:\n- id: root\n  enabled: true\n  stages: []\n",
+                encoding="utf-8",
+            )
+            child_yaml_path.write_text("pipelines: []\n", encoding="utf-8")
+
+            handler = TestableDebugApiHandler(
+                "/api/pipeline_config/pipelines",
+                method="POST",
+                body=json.dumps(
+                    {
+                        "pipeline_config_path": "preprocessors/mask-pipeline.yaml",
+                        "pipelines_config": {
+                            "enabled": True,
+                            "frame_interval_seconds": 0.5,
+                            "pipelines": [
+                                {
+                                    "id": "mask-pipeline",
+                                    "enabled": True,
+                                    "stages": [
+                                        {
+                                            "id": "polygon-mask",
+                                            "enabled": True,
+                                            "module": (
+                                                "nvr_common.pipeline.sample_stages.mask_stage"
+                                            ),
+                                            "class": "MaskStage",
+                                            "config": {
+                                                "polygons": [
+                                                    [
+                                                        {"x": 1, "y": 2},
+                                                        {"x": 3, "y": 4},
+                                                        {"x": 5, "y": 6},
+                                                    ]
+                                                ]
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ).encode("utf-8"),
+            )
+            handler.do_POST()
+
+            saved_child = yaml.safe_load(child_yaml_path.read_text(encoding="utf-8"))
+            saved_root = yaml.safe_load(
+                (pipelines_dir / "pipelines.yaml").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(200, handler.status)
+            self.assertEqual(
+                [[{"x": 1, "y": 2}, {"x": 3, "y": 4}, {"x": 5, "y": 6}]],
+                saved_child["pipelines"][0]["stages"][0]["config"]["polygons"],
+            )
+            self.assertNotEqual(
+                "mask-pipeline",
+                saved_root["pipelines"][0]["id"],
+            )
 
     def test_pipeline_config_response_includes_yaml_and_python_file_tree(self):
         with tempfile.TemporaryDirectory() as temp_dir:

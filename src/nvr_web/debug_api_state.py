@@ -117,8 +117,12 @@ class DebugApiState:
         LogReader(Logger().log_file_path).clear()
         Logger().logger.debug("Logs cleared")
 
-    def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
-        response = self.pipelines_store.save_pipeline_config_pipelines(raw_pipelines)
+    def save_pipeline_config_pipelines(
+        self, raw_pipelines: dict[str, Any], pipeline_config_path: str | None = None
+    ) -> dict[str, Any]:
+        response = self.pipelines_store.save_pipeline_config_pipelines(
+            raw_pipelines, pipeline_config_path
+        )
         self.sessions.clear()
         return response
 

@@ -60,6 +60,9 @@ class PipelineDebugSession:
     def clear_breakpoint(self, pipeline_id: str, stage_id: str | None = None) -> None:
         self.breakpoints.discard((pipeline_id, stage_id))
 
+    def has_pending_step(self) -> bool:
+        return self._cursor < len(self._steps)
+
     def step(self) -> StageDebugRecord | None:
         if self._cursor >= len(self._steps):
             self.status = "completed"

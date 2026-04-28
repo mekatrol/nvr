@@ -142,18 +142,21 @@ class PipelinesStore:
         pipelines_config = Config._unwrap_pipelines_config(data)
         return self._normalize_pipelines_config(pipelines_config)
 
-    def save_pipeline_config_pipelines(self, raw_pipelines: dict[str, Any]) -> dict[str, Any]:
-        self._log_info("Saving pipeline config to %s", self.pipelines_path)
+    def save_pipeline_config_pipelines(
+        self, raw_pipelines: dict[str, Any], filename: str | None = None
+    ) -> dict[str, Any]:
+        yaml_path = self.pipeline_config_file_path(filename) if filename else self.pipelines_path
+        self._log_info("Saving pipeline config to %s", yaml_path)
         pipelines_config = self._normalize_pipelines_config(raw_pipelines)
         pipelines_config = self._relativize_stage_filenames(
-            pipelines_config, self.pipelines_path, self.pipelines_dir
+            pipelines_config, yaml_path, self.pipelines_dir
         )
         self._validate_pipelines_config(
-            pipelines_config, self.pipelines_path, self.pipelines_dir
+            pipelines_config, yaml_path, self.pipelines_dir
         )
-        self._write_yaml(self.pipelines_path, pipelines_config)
-        self._log_info("Pipeline config saved to %s", self.pipelines_path)
-        return self.pipelines_response(pipelines_config)
+        self._write_yaml(yaml_path, pipelines_config)
+        self._log_info("Pipeline config saved to %s", yaml_path)
+        return self.pipelines_response(pipelines_config, yaml_path, expand_paths=bool(filename))
 
     def deploy_pipeline_config_pipelines(self) -> dict[str, Any]:
         self._log_info("Deploying pipeline config to %s", self.deployed_path)

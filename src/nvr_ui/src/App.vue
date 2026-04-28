@@ -107,6 +107,8 @@ const materialIcons = {
   stepPipeline: 'account_tree',
   breakpoint: 'radio_button_checked',
   clearBreakpoint: 'block',
+  expand: 'fullscreen',
+  collapse: 'fullscreen_exit',
 } as const
 
 const cameras = ref<Camera[]>([])
@@ -149,6 +151,8 @@ const isRunLoopTicking = ref(false)
 const currentAction = ref('')
 const maskPreviewImage = ref<HTMLImageElement | null>(null)
 const maskDraftPolygon = ref<MaskPoint[]>([])
+const expandedPreview = ref<'input' | 'output' | null>(null)
+const ignoreNextMaskClick = ref(false)
 const vscodeWebUrl = computed(
   () =>
     import.meta.env.VITE_VSCODE_WEB_URL ||
@@ -162,6 +166,20 @@ const selectedCamera = computed(() =>
 )
 
 const latestRecord = computed(() => debugState.value.records?.at(-1))
+const stagePreviewRecord = computed(() => {
+  const records = debugState.value.records ?? []
+  if (!selectedPipelineId.value || !selectedStageId.value) return latestRecord.value
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index]
+    if (
+      record?.pipeline_id === selectedPipelineId.value &&
+      record.stage_id === selectedStageId.value
+    ) {
+      return record
+    }
+  }
+  return latestRecord.value
+})
 const hasPipelineIntegrityProblem = computed(() => !pipelineIntegrity.value.ok)
 
 const filteredLogEntries = computed(() => {
@@ -213,16 +231,14 @@ const canStep = computed(
 const canEditPipelines = computed(() => !isRunLoopActive.value && !isActionBusy.value)
 const canApplyPipeline = computed(() => canEditPipelines.value && hasPipelinesPipeline.value)
 const canApplyStage = computed(() => canEditPipelines.value && hasPipelinesStage.value)
-const maskPreviewShape = computed(
-  () => latestRecord.value?.output_shape ?? latestRecord.value?.input_shape,
-)
+const maskPreviewShape = computed(() => stagePreviewRecord.value?.input_shape ?? null)
 const maskFrameWidth = computed(() => maskPreviewShape.value?.[1] ?? 0)
 const maskFrameHeight = computed(() => maskPreviewShape.value?.[0] ?? 0)
 const canDraftMask = computed(
   () =>
     hasPipelinesStage.value &&
     isSelectedMaskStage.value &&
-    Boolean(latestRecord.value?.output_preview) &&
+    Boolean(stagePreviewRecord.value?.input_preview) &&
     maskFrameWidth.value > 0 &&
     maskFrameHeight.value > 0,
 )
@@ -420,16 +436,17 @@ async function savePipelineConfigPipelines() {
   const validationError = validatePipelinesPipelineReferences()
   if (validationError) {
     apiError.value = validationError
-    return
+    return undefined
   }
-  const saved = await postJson<PipelinesResponse>(
-    '/api/pipeline_config/pipelines',
-    toPipelinesPayload(),
-  )
+  const saved = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines', {
+    pipeline_config_path: selectedPipelineConfigPath.value,
+    pipelines_config: toPipelinesPayload(),
+  })
   pipelineConfigPipelines.value = saved.pipelines
   pipelineFileTree.value = saved.pipeline_file_tree ?? pipelineFileTree.value
   refreshSelectedEditors()
-  deployStatus.value = 'Pipelines saved'
+  deployStatus.value = `Pipelines saved to ${saved.selected_pipeline_config_path || 'pipelines.yaml'}`
+  return saved
 }
 
 async function withAction<T>(action: string, task: () => Promise<T>): Promise<T | undefined> {
@@ -646,6 +663,7 @@ async function applyStageEdits() {
   if (!stage) return
   const nextId = selectedStageIdEdit.value.trim()
   if (!nextId) return
+  commitMaskDraftPolygon()
   try {
     stage.config = JSON.parse(selectedStageConfigJson.value) as Record<string, unknown>
   } catch {
@@ -662,14 +680,15 @@ async function applyStageEdits() {
   currentAction.value = 'apply_stage'
   try {
     await stopRunLoop(false)
-    await savePipelineConfigPipelines()
+    const saved = await savePipelineConfigPipelines()
+    if (!saved) return
     await loadPipelines()
     if (selectedCameraId.value && !hasPipelineIntegrityProblem.value) {
       await runCommand('run')
     } else {
       await loadDebugState()
     }
-    deployStatus.value = 'Stage applied and debugger refreshed'
+    deployStatus.value = `Stage applied from ${saved.selected_pipeline_config_path || 'pipelines.yaml'}`
   } finally {
     currentAction.value = ''
   }
@@ -760,6 +779,20 @@ function isYamlPath(path: string) {
 }
 
 function handleMaskPreviewClick(event: MouseEvent) {
+  if (ignoreNextMaskClick.value) {
+    ignoreNextMaskClick.value = false
+    return
+  }
+  addMaskPreviewPoint(event)
+}
+
+function handleMaskPreviewDoubleClick(event: MouseEvent) {
+  ignoreNextMaskClick.value = true
+  addMaskPreviewPoint(event)
+  commitMaskDraftPolygon()
+}
+
+function addMaskPreviewPoint(event: MouseEvent) {
   if (!canDraftMask.value) return
   const image = maskPreviewImage.value
   if (!image) return
@@ -772,10 +805,13 @@ function handleMaskPreviewClick(event: MouseEvent) {
   })
 }
 
+function togglePreviewExpansion(preview: 'input' | 'output') {
+  expandedPreview.value = expandedPreview.value === preview ? null : preview
+}
+
 function closeMaskPolygon() {
   if (!hasMaskDraftArea.value) return
-  updateMaskConfig([...maskPolygons.value, [...maskDraftPolygon.value]])
-  maskDraftPolygon.value = []
+  commitMaskDraftPolygon()
 }
 
 function undoMaskPoint() {
@@ -795,6 +831,16 @@ function updateMaskConfig(polygons: MaskPoint[][]) {
   const config = readMaskConfig()
   config.polygons = polygons
   selectedStageConfigJson.value = formatJson(config)
+  const stage = selectedPipelinesStage.value
+  if (stage && isSelectedMaskStage.value) {
+    stage.config = config
+  }
+}
+
+function commitMaskDraftPolygon() {
+  if (!hasMaskDraftArea.value) return
+  updateMaskConfig([...maskPolygons.value, [...maskDraftPolygon.value]])
+  maskDraftPolygon.value = []
 }
 
 function readMaskPolygons() {
@@ -871,6 +917,7 @@ function validatePipelinesPipelineReferences() {
   for (const pipeline of pipelineConfigPipelines.value) {
     for (const stage of pipeline.stages) {
       if (!stage.pipeline) continue
+      if (isYamlPath(stage.pipeline)) continue
       if (!pipelineIds.has(stage.pipeline)) {
         return `Stage ${pipeline.id}/${stage.id} references unknown pipeline ${stage.pipeline}`
       }
@@ -1394,13 +1441,154 @@ onBeforeUnmount(() => {
             <span>Step {{ debugState.cursor ?? 0 }} / {{ debugState.total_steps ?? 0 }}</span>
           </header>
 
+          <section class="stage-preview" aria-label="Stage image preview">
+            <header class="stage-preview-header">
+              <strong>Stage Preview</strong>
+              <span
+                >{{ stagePreviewRecord?.pipeline_id }} / {{ stagePreviewRecord?.stage_id }}</span
+              >
+            </header>
+            <div class="stage-preview-grid">
+              <article
+                class="stage-preview-pane"
+                :class="{ expanded: expandedPreview === 'input' }"
+              >
+                <header>
+                  <strong>Entering Stage</strong>
+                  <button
+                    :disabled="!stagePreviewRecord?.input_preview"
+                    :title="
+                      expandedPreview === 'input'
+                        ? 'Collapse input preview'
+                        : 'Expand input preview'
+                    "
+                    @click="togglePreviewExpansion('input')"
+                  >
+                    <span class="material-symbols-outlined" aria-hidden="true">
+                      {{
+                        expandedPreview === 'input' ? materialIcons.collapse : materialIcons.expand
+                      }}
+                    </span>
+                  </button>
+                </header>
+                <div class="preview-surface">
+                  <div
+                    v-if="stagePreviewRecord?.input_preview"
+                    class="mask-preview-frame"
+                    :class="{ editable: canDraftMask }"
+                  >
+                    <img
+                      ref="maskPreviewImage"
+                      :src="stagePreviewRecord.input_preview"
+                      alt="Stage input preview"
+                      @click="handleMaskPreviewClick"
+                      @dblclick="handleMaskPreviewDoubleClick"
+                    />
+                    <svg
+                      v-if="maskFrameWidth > 0 && maskFrameHeight > 0"
+                      class="mask-overlay"
+                      :viewBox="`0 0 ${maskFrameWidth} ${maskFrameHeight}`"
+                      preserveAspectRatio="none"
+                      aria-hidden="true"
+                    >
+                      <polygon
+                        v-for="(polygon, index) in maskPolygons"
+                        :key="`mask-${index}`"
+                        :points="maskPolygonPoints(polygon)"
+                        class="mask-polygon"
+                      />
+                      <template
+                        v-for="(polygon, polygonIndex) in maskPolygons"
+                        :key="`points-${polygonIndex}`"
+                      >
+                        <circle
+                          v-for="(point, pointIndex) in polygon"
+                          :key="`point-${polygonIndex}-${pointIndex}`"
+                          :cx="point.x"
+                          :cy="point.y"
+                          :r="Math.max(3, Math.round(maskFrameWidth / 160))"
+                          class="mask-polygon-point"
+                        />
+                      </template>
+                      <polygon
+                        v-if="hasMaskDraftArea"
+                        :points="maskPolygonPoints(maskDraftPolygon)"
+                        class="mask-draft-polygon"
+                      />
+                      <polyline
+                        v-if="maskDraftPolygon.length > 0"
+                        :points="maskPolygonPoints(maskDraftPolygon)"
+                        class="mask-draft-line"
+                      />
+                      <circle
+                        v-for="(point, index) in maskDraftPolygon"
+                        :key="`draft-${index}`"
+                        :cx="point.x"
+                        :cy="point.y"
+                        :r="Math.max(3, Math.round(maskFrameWidth / 160))"
+                        class="mask-draft-point"
+                      />
+                    </svg>
+                  </div>
+                  <span v-else>No input preview available</span>
+                  <footer>
+                    <span>Input {{ stagePreviewRecord?.input_shape ?? [] }}</span>
+                  </footer>
+                </div>
+              </article>
+
+              <article
+                class="stage-preview-pane"
+                :class="{ expanded: expandedPreview === 'output' }"
+              >
+                <header>
+                  <strong>Exiting Stage</strong>
+                  <button
+                    :disabled="!stagePreviewRecord?.output_preview"
+                    :title="
+                      expandedPreview === 'output'
+                        ? 'Collapse output preview'
+                        : 'Expand output preview'
+                    "
+                    @click="togglePreviewExpansion('output')"
+                  >
+                    <span class="material-symbols-outlined" aria-hidden="true">
+                      {{
+                        expandedPreview === 'output' ? materialIcons.collapse : materialIcons.expand
+                      }}
+                    </span>
+                  </button>
+                </header>
+                <div class="preview-surface">
+                  <img
+                    v-if="stagePreviewRecord?.output_preview"
+                    :src="stagePreviewRecord.output_preview"
+                    alt="Stage output preview"
+                  />
+                  <span v-else>No output preview available</span>
+                  <footer>
+                    <span>Output {{ stagePreviewRecord?.output_shape ?? [] }}</span>
+                  </footer>
+                </div>
+              </article>
+            </div>
+          </section>
+
           <section class="graph">
             <div v-for="pipeline in visiblePipelines" :key="pipeline.id" class="pipeline-card">
               <header>
                 <strong>{{ pipeline.name || pipeline.id }}</strong>
                 <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
               </header>
-              <button v-for="stage in pipeline.stages" :key="stage.id" class="stage-row">
+              <button
+                v-for="stage in pipeline.stages"
+                :key="stage.id"
+                class="stage-row"
+                :class="{
+                  selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId,
+                }"
+                @click="selectStageInPipeline(pipeline.id, stage.id)"
+              >
                 <span>{{ stage.id }}</span>
                 <small>{{ stageSummary(stage) }}</small>
               </button>
@@ -1555,10 +1743,7 @@ onBeforeUnmount(() => {
                   <textarea v-model="selectedStageConfigJson" rows="8"></textarea>
                 </label>
                 <div class="mask-controls">
-                  <button
-                    :disabled="!canDraftMask || !hasMaskDraftArea"
-                    @click="closeMaskPolygon"
-                  >
+                  <button :disabled="!canDraftMask || !hasMaskDraftArea" @click="closeMaskPolygon">
                     Close Polygon
                   </button>
                   <button
@@ -1586,77 +1771,6 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="details">
-            <div class="preview">
-              <header>
-                <strong>Preview</strong>
-                <span>{{ latestRecord?.pipeline_id }} / {{ latestRecord?.stage_id }}</span>
-              </header>
-              <div class="preview-surface">
-                <div
-                  v-if="latestRecord?.output_preview"
-                  class="mask-preview-frame"
-                  :class="{ editable: canDraftMask }"
-                >
-                  <img
-                    ref="maskPreviewImage"
-                    :src="latestRecord.output_preview"
-                    alt="Latest stage output preview"
-                    @click="handleMaskPreviewClick"
-                  />
-                  <svg
-                    v-if="maskFrameWidth > 0 && maskFrameHeight > 0"
-                    class="mask-overlay"
-                    :viewBox="`0 0 ${maskFrameWidth} ${maskFrameHeight}`"
-                    preserveAspectRatio="none"
-                    aria-hidden="true"
-                  >
-                    <polygon
-                      v-for="(polygon, index) in maskPolygons"
-                      :key="`mask-${index}`"
-                      :points="maskPolygonPoints(polygon)"
-                      class="mask-polygon"
-                    />
-                    <template
-                      v-for="(polygon, polygonIndex) in maskPolygons"
-                      :key="`points-${polygonIndex}`"
-                    >
-                      <circle
-                        v-for="(point, pointIndex) in polygon"
-                        :key="`point-${polygonIndex}-${pointIndex}`"
-                        :cx="point.x"
-                        :cy="point.y"
-                        :r="Math.max(3, Math.round(maskFrameWidth / 160))"
-                        class="mask-polygon-point"
-                      />
-                    </template>
-                    <polygon
-                      v-if="hasMaskDraftArea"
-                      :points="maskPolygonPoints(maskDraftPolygon)"
-                      class="mask-draft-polygon"
-                    />
-                    <polyline
-                      v-if="maskDraftPolygon.length > 0"
-                      :points="maskPolygonPoints(maskDraftPolygon)"
-                      class="mask-draft-line"
-                    />
-                    <circle
-                      v-for="(point, index) in maskDraftPolygon"
-                      :key="`draft-${index}`"
-                      :cx="point.x"
-                      :cy="point.y"
-                      :r="Math.max(3, Math.round(maskFrameWidth / 160))"
-                      class="mask-draft-point"
-                    />
-                  </svg>
-                </div>
-                <span v-else>No preview available</span>
-                <footer>
-                  <span>Input {{ latestRecord?.input_shape ?? [] }}</span>
-                  <span>Output {{ latestRecord?.output_shape ?? [] }}</span>
-                </footer>
-              </div>
-            </div>
-
             <div class="metadata">
               <header>
                 <strong>Metadata</strong>
@@ -2084,7 +2198,7 @@ button:disabled .material-symbols-outlined {
 }
 
 .pipeline-card header,
-.preview header,
+.stage-preview header,
 .metadata header {
   display: flex;
   justify-content: space-between;
@@ -2175,14 +2289,88 @@ button:disabled .material-symbols-outlined {
   gap: 8px;
 }
 
+.stage-preview {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.stage-preview-header {
+  align-items: center;
+  color: #394b5f;
+}
+
+.stage-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.stage-preview-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.stage-preview-pane header {
+  align-items: center;
+}
+
+.stage-preview-pane header button {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2933;
+  cursor: pointer;
+}
+
+.stage-preview-pane .material-symbols-outlined {
+  width: 18px;
+  overflow: hidden;
+  height: 18px;
+  font-size: 18px;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 20;
+  line-height: 1;
+}
+
+.stage-preview-pane.expanded {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  gap: 12px;
+  padding: 16px;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.stage-preview-pane.expanded header {
+  min-height: 40px;
+}
+
+.stage-preview-pane.expanded header button {
+  border-color: #506070;
+  background: #18222f;
+  color: #f8fafc;
+}
+
 .details {
   display: grid;
-  grid-template-columns: minmax(260px, 420px) 1fr;
-  gap: 16px;
   min-height: 0;
 }
 
-.preview,
 .metadata {
   display: grid;
   gap: 10px;
@@ -2206,6 +2394,13 @@ button:disabled .material-symbols-outlined {
   color: #627386;
 }
 
+.stage-preview-pane.expanded .preview-surface {
+  min-height: 0;
+  border-color: #334155;
+  background: #020617;
+  color: #cbd5e1;
+}
+
 .mask-preview-frame {
   position: relative;
   display: inline-grid;
@@ -2221,6 +2416,10 @@ button:disabled .material-symbols-outlined {
   max-width: 100%;
   max-height: 360px;
   object-fit: contain;
+}
+
+.stage-preview-pane.expanded .preview-surface img {
+  max-height: calc(100vh - 132px);
 }
 
 .mask-overlay {
@@ -2275,6 +2474,12 @@ button:disabled .material-symbols-outlined {
   background: #111827;
   color: #e5e7eb;
   font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .stage-preview-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .error {

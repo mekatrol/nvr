@@ -81,7 +81,12 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 self._json({"error": "pipelines config is required"}, status=400)
                 return
             try:
-                self._json(api_state.save_pipeline_config_pipelines(raw_pipelines))
+                self._json(
+                    api_state.save_pipeline_config_pipelines(
+                        raw_pipelines,
+                        self._body_string(body, "pipeline_config_path"),
+                    )
+                )
             except ValueError as ex:
                 self._json({"error": str(ex)}, status=400)
             return
@@ -161,10 +166,43 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
             elif command == "pause":
                 session.status = "paused"
             elif command == "step":
+                if not session.has_pending_step():
+                    try:
+                        session = api_state.load_camera_frame(
+                            body.get("camera_id", ""), pipeline_config_path
+                        )
+                    except RuntimeError as ex:
+                        self._json({"error": str(ex)}, status=502)
+                        return
+                    if session is None:
+                        self._json({"error": self._no_deployed_pipeline_error()}, status=404)
+                        return
                 session.step()
             elif command == "step_over_stage":
+                if not session.has_pending_step():
+                    try:
+                        session = api_state.load_camera_frame(
+                            body.get("camera_id", ""), pipeline_config_path
+                        )
+                    except RuntimeError as ex:
+                        self._json({"error": str(ex)}, status=502)
+                        return
+                    if session is None:
+                        self._json({"error": self._no_deployed_pipeline_error()}, status=404)
+                        return
                 session.step()
             elif command == "step_over_pipeline":
+                if not session.has_pending_step():
+                    try:
+                        session = api_state.load_camera_frame(
+                            body.get("camera_id", ""), pipeline_config_path
+                        )
+                    except RuntimeError as ex:
+                        self._json({"error": str(ex)}, status=502)
+                        return
+                    if session is None:
+                        self._json({"error": self._no_deployed_pipeline_error()}, status=404)
+                        return
                 session.step_over_pipeline()
             else:
                 self._json({"error": "unknown command"}, status=400)
