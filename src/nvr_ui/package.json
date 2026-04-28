@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --open",
-    "dev:debug": "vite --host 127.0.0.1",
+    "dev:debug": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",

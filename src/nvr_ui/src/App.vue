@@ -81,6 +81,16 @@ type LogEntry = {
 
 type LogSeverity = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
 
+type MaskPoint = {
+  x: number
+  y: number
+}
+
+type MaskConfig = {
+  polygons?: MaskPoint[][]
+  [key: string]: unknown
+}
+
 const logSeverityOptions: LogSeverity[] = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
 
 const materialIcons = {
@@ -137,6 +147,8 @@ const runLoopTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const isRunLoopActive = ref(false)
 const isRunLoopTicking = ref(false)
 const currentAction = ref('')
+const maskPreviewImage = ref<HTMLImageElement | null>(null)
+const maskDraftPolygon = ref<MaskPoint[]>([])
 const vscodeWebUrl = computed(
   () =>
     import.meta.env.VITE_VSCODE_WEB_URL ||
@@ -192,6 +204,19 @@ const canStep = computed(
 const canEditPipelines = computed(() => !isRunLoopActive.value && !isActionBusy.value)
 const canApplyPipeline = computed(() => canEditPipelines.value && hasPipelinesPipeline.value)
 const canApplyStage = computed(() => canEditPipelines.value && hasPipelinesStage.value)
+const maskPreviewShape = computed(
+  () => latestRecord.value?.output_shape ?? latestRecord.value?.input_shape,
+)
+const maskFrameWidth = computed(() => maskPreviewShape.value?.[1] ?? 0)
+const maskFrameHeight = computed(() => maskPreviewShape.value?.[0] ?? 0)
+const canEditMask = computed(
+  () =>
+    canApplyStage.value &&
+    Boolean(latestRecord.value?.output_preview) &&
+    maskFrameWidth.value > 0 &&
+    maskFrameHeight.value > 0,
+)
+const maskPolygons = computed(() => readMaskPolygons())
 const canSetBreakpoint = computed(
   () =>
     hasSelectedCamera.value &&
@@ -221,16 +246,11 @@ async function loadPipelines() {
   const graph = await getJson<{
     pipelines: Pipeline[]
     integrity?: PipelineIntegrity
-  }>(
-    `/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`,
-  )
+  }>(`/api/pipelines?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`)
   applyPipelineGraph(graph)
 }
 
-function applyPipelineGraph(graph: {
-  pipelines: Pipeline[]
-  integrity?: PipelineIntegrity
-}) {
+function applyPipelineGraph(graph: { pipelines: Pipeline[]; integrity?: PipelineIntegrity }) {
   pipelines.value = graph.pipelines
   pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
 }
@@ -253,7 +273,10 @@ async function loadPipelineConfigPipelines() {
 
 async function reloadPipelines() {
   await stopRunLoop(false)
-  await postJson<{ pipelines: Pipeline[]; integrity?: PipelineIntegrity }>('/api/pipelines/reload', {})
+  await postJson<{ pipelines: Pipeline[]; integrity?: PipelineIntegrity }>(
+    '/api/pipelines/reload',
+    {},
+  )
   await loadPipelines()
   await loadPipelineConfigPipelines()
   await loadDebugState()
@@ -540,6 +563,23 @@ function addStage() {
   selectStage(baseId)
 }
 
+function addMaskStage() {
+  if (!selectedPipelinesPipeline.value) return
+  const baseId = uniqueId(
+    'mask',
+    selectedPipelinesPipeline.value.stages.map((stage) => stage.id),
+  )
+  selectedPipelinesPipeline.value.stages.push({
+    id: baseId,
+    enabled: true,
+    filename: 'nvr_common/pipeline/sample_stages/mask_stage.py',
+    class_name: 'MaskStage',
+    config: { polygons: [] },
+  })
+  selectStage(baseId)
+  currentView.value = 'debug'
+}
+
 function addStageToPipeline(pipelineId: string) {
   selectPipeline(pipelineId)
   addStage()
@@ -634,6 +674,7 @@ function refreshSelectedEditors() {
   selectedStageFilename.value = stage?.filename ?? ''
   selectedStagePipeline.value = stage?.pipeline ?? ''
   selectedStageConfigJson.value = formatJson(stage?.config ?? {})
+  maskDraftPolygon.value = []
 }
 
 function toPipelinesPayload() {
@@ -704,6 +745,87 @@ function pipelineConfigPathQuery() {
 
 function isYamlPath(path: string) {
   return /\.(ya?ml)$/i.test(path)
+}
+
+function handleMaskPreviewClick(event: MouseEvent) {
+  if (!canEditMask.value) return
+  const image = maskPreviewImage.value
+  if (!image) return
+  const rect = image.getBoundingClientRect()
+  const x = Math.round(((event.clientX - rect.left) / rect.width) * maskFrameWidth.value)
+  const y = Math.round(((event.clientY - rect.top) / rect.height) * maskFrameHeight.value)
+  maskDraftPolygon.value.push({
+    x: clamp(x, 0, Math.max(0, maskFrameWidth.value - 1)),
+    y: clamp(y, 0, Math.max(0, maskFrameHeight.value - 1)),
+  })
+}
+
+function closeMaskPolygon() {
+  if (maskDraftPolygon.value.length < 3) return
+  updateMaskConfig([...maskPolygons.value, [...maskDraftPolygon.value]])
+  maskDraftPolygon.value = []
+}
+
+function undoMaskPoint() {
+  maskDraftPolygon.value = maskDraftPolygon.value.slice(0, -1)
+}
+
+function clearMaskDraft() {
+  maskDraftPolygon.value = []
+}
+
+function clearMaskPolygons() {
+  updateMaskConfig([])
+  maskDraftPolygon.value = []
+}
+
+function updateMaskConfig(polygons: MaskPoint[][]) {
+  const config = readMaskConfig()
+  config.polygons = polygons
+  selectedStageConfigJson.value = formatJson(config)
+}
+
+function readMaskPolygons() {
+  return readMaskConfig().polygons ?? []
+}
+
+function readMaskConfig(): MaskConfig {
+  try {
+    const parsed = JSON.parse(selectedStageConfigJson.value || '{}') as MaskConfig
+    const polygons = Array.isArray(parsed.polygons) ? parsed.polygons : []
+    return {
+      ...parsed,
+      polygons: polygons
+        .map((polygon) => normalizeMaskPolygon(polygon))
+        .filter((polygon) => polygon.length > 0),
+    }
+  } catch {
+    return { polygons: [] }
+  }
+}
+
+function normalizeMaskPolygon(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((point) => normalizeMaskPoint(point))
+    .filter((point): point is MaskPoint => point !== null)
+}
+
+function normalizeMaskPoint(value: unknown): MaskPoint | null {
+  if (!value || typeof value !== 'object') return null
+  const point = value as Record<string, unknown>
+  const x = point.x
+  const y = point.y
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return { x: Math.round(Number(x)), y: Math.round(Number(y)) }
+}
+
+function maskPolygonPoints(polygon: MaskPoint[]) {
+  return polygon.map((point) => `${point.x},${point.y}`).join(' ')
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
 }
 
 function startLogRefresh() {
@@ -1346,7 +1468,10 @@ onBeforeUnmount(() => {
 
                 <header>
                   <strong>Stages</strong>
-                  <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
+                  <div class="editor-header-actions">
+                    <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
+                    <button :disabled="!canApplyPipeline" @click="addMaskStage">Mask</button>
+                  </div>
                 </header>
                 <button
                   v-for="stage in selectedPipelinesPipeline?.stages ?? []"
@@ -1406,9 +1531,34 @@ onBeforeUnmount(() => {
                   <span>Config JSON</span>
                   <textarea v-model="selectedStageConfigJson" rows="8"></textarea>
                 </label>
+                <div class="mask-controls">
+                  <button
+                    :disabled="!canEditMask || maskDraftPolygon.length < 3"
+                    @click="closeMaskPolygon"
+                  >
+                    Close Polygon
+                  </button>
+                  <button
+                    :disabled="!canEditMask || maskDraftPolygon.length === 0"
+                    @click="undoMaskPoint"
+                  >
+                    Undo Point
+                  </button>
+                  <button
+                    :disabled="!canEditMask || maskDraftPolygon.length === 0"
+                    @click="clearMaskDraft"
+                  >
+                    Clear Draft
+                  </button>
+                  <button
+                    :disabled="!canApplyStage || maskPolygons.length === 0"
+                    @click="clearMaskPolygons"
+                  >
+                    Clear Masks
+                  </button>
+                </div>
                 <button :disabled="!canApplyStage" @click="applyStageEdits">Apply Stage</button>
               </section>
-
             </div>
           </section>
 
@@ -1419,11 +1569,45 @@ onBeforeUnmount(() => {
                 <span>{{ latestRecord?.pipeline_id }} / {{ latestRecord?.stage_id }}</span>
               </header>
               <div class="preview-surface">
-                <img
+                <div
                   v-if="latestRecord?.output_preview"
-                  :src="latestRecord.output_preview"
-                  alt="Latest stage output preview"
-                />
+                  class="mask-preview-frame"
+                  :class="{ editable: canEditMask }"
+                >
+                  <img
+                    ref="maskPreviewImage"
+                    :src="latestRecord.output_preview"
+                    alt="Latest stage output preview"
+                    @click="handleMaskPreviewClick"
+                  />
+                  <svg
+                    v-if="maskFrameWidth > 0 && maskFrameHeight > 0"
+                    class="mask-overlay"
+                    :viewBox="`0 0 ${maskFrameWidth} ${maskFrameHeight}`"
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                  >
+                    <polygon
+                      v-for="(polygon, index) in maskPolygons"
+                      :key="`mask-${index}`"
+                      :points="maskPolygonPoints(polygon)"
+                      class="mask-polygon"
+                    />
+                    <polyline
+                      v-if="maskDraftPolygon.length > 0"
+                      :points="maskPolygonPoints(maskDraftPolygon)"
+                      class="mask-draft-line"
+                    />
+                    <circle
+                      v-for="(point, index) in maskDraftPolygon"
+                      :key="`draft-${index}`"
+                      :cx="point.x"
+                      :cy="point.y"
+                      :r="Math.max(3, Math.round(maskFrameWidth / 160))"
+                      class="mask-draft-point"
+                    />
+                  </svg>
+                </div>
                 <span v-else>No preview available</span>
                 <footer>
                   <span>Input {{ latestRecord?.input_shape ?? [] }}</span>
@@ -1904,6 +2088,12 @@ button:disabled .material-symbols-outlined {
   gap: 8px;
 }
 
+.editor-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .editor-actions button,
 .editor-panel button {
   border: 1px solid #b8c2cc;
@@ -1938,6 +2128,12 @@ button:disabled .material-symbols-outlined {
   font-size: 13px;
 }
 
+.mask-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .details {
   display: grid;
   grid-template-columns: minmax(260px, 420px) 1fr;
@@ -1969,11 +2165,50 @@ button:disabled .material-symbols-outlined {
   color: #627386;
 }
 
+.mask-preview-frame {
+  position: relative;
+  display: inline-grid;
+  max-width: 100%;
+}
+
+.mask-preview-frame.editable img {
+  cursor: crosshair;
+}
+
 .preview-surface img {
   display: block;
   max-width: 100%;
   max-height: 360px;
   object-fit: contain;
+}
+
+.mask-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.mask-polygon {
+  fill: rgb(0 0 0 / 48%);
+  stroke: #f59e0b;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.mask-draft-line {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.mask-draft-point {
+  fill: #38bdf8;
+  stroke: #0f172a;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .preview-surface footer {

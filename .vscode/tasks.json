@@ -13,10 +13,10 @@
         {
             "label": "Start NVR Vue UI",
             "type": "shell",
-            "command": "npm run dev:debug",
-            "options": {
-                "cwd": "${workspaceFolder}/src/nvr_ui"
-            },
+            "command": "bash",
+            "args": [
+                "${workspaceFolder}/scripts/start_vite_debug.sh"
+            ],
             "isBackground": true,
             "problemMatcher": {
                 "owner": "vite",
@@ -28,7 +28,7 @@
                 },
                 "background": {
                     "activeOnStart": true,
-                    "beginsPattern": ".*VITE.*",
+                    "beginsPattern": ".*(Starting NVR Vue UI|NVR Vue UI already running|VITE).*",
                     "endsPattern": ".*Local:\\s+http://127\\.0\\.0\\.1:5173/.*"
                 }
             }
