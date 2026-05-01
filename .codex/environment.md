@@ -56,3 +56,11 @@ Run before handoff after Python changes:
 - Do not run service for routine checks. It starts `ffmpeg` and touches camera paths.
 - Vue SPA lives under `src/nvr_ui`.
 - Keep generated frontend output ignored: `node_modules`, `dist`, `dist-ssr`, coverage, TS build info.
+
+## Image Capture
+
+- RTSP image capture must use `ffmpeg`, not OpenCV `VideoCapture`.
+- OpenCV may decode already-complete image bytes or local files.
+- Do not use OpenCV as the RTSP/H264/H265 transport or decoder.
+- For RTSP H264/H265, prefer `FfmpegRtspFrameSource`.
+- Keep ffmpeg RTSP transport on TCP.

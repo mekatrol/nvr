@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import inspect
 from typing import Any
 
 from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
@@ -180,11 +181,24 @@ class DebugApiState:
             return frame_source
 
         camera_config = self.config.get_camera(camera_id)
-        frame_source = self.frame_source_factory(
-            camera_config[Config.KEY_CAMERA_RTSP_URL]
-        )
+        if self._frame_source_accepts_ffmpeg_binary():
+            frame_source = self.frame_source_factory(
+                camera_config[Config.KEY_CAMERA_RTSP_URL],
+                ffmpeg_binary=self.config.get(Config.KEY_FFMPEG_BINARY, "ffmpeg"),
+            )
+        else:
+            frame_source = self.frame_source_factory(
+                camera_config[Config.KEY_CAMERA_RTSP_URL]
+            )
         self.frame_sources[camera_id] = frame_source
         return frame_source
+
+    def _frame_source_accepts_ffmpeg_binary(self) -> bool:
+        try:
+            parameters = inspect.signature(self.frame_source_factory).parameters
+        except (TypeError, ValueError):
+            return False
+        return "ffmpeg_binary" in parameters
 
     def close_frame_sources(self) -> None:
         for frame_source in self.frame_sources.values():

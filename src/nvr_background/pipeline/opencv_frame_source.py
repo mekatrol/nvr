@@ -1,20 +1,11 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import cv2
 
+from nvr_background.pipeline.ffmpeg_rtsp_frame_source import FfmpegRtspFrameSource
 from nvr_common.pipeline.frame_validation import bad_frame_reason
-
-RTSP_FFMPEG_CAPTURE_OPTIONS = (
-    "rtsp_transport;tcp"
-    "|fflags;discardcorrupt+nobuffer"
-    "|flags;low_delay"
-    "|err_detect;explode"
-    "|max_delay;500000"
-    "|reorder_queue_size;0"
-)
 
 
 class OpenCvFrameSource:
@@ -23,9 +14,12 @@ class OpenCvFrameSource:
         source: str,
         open_timeout_milliseconds: int = 5000,
         read_timeout_milliseconds: int = 5000,
-        warmup_frames: int = 8,
+        warmup_frames: int = 30,
         read_drain_frames: int = 3,
         clean_read_attempts: int = 5,
+        capture_buffer_size: int = 8,
+        ffmpeg_binary: str = "ffmpeg",
+        hardware_acceleration: str | None = "auto",
     ) -> None:
         self.source = source
         self.open_timeout_milliseconds = open_timeout_milliseconds
@@ -33,12 +27,27 @@ class OpenCvFrameSource:
         self.warmup_frames = warmup_frames
         self.read_drain_frames = read_drain_frames
         self.clean_read_attempts = clean_read_attempts
+        self.capture_buffer_size = capture_buffer_size
+        self.ffmpeg_binary = ffmpeg_binary
+        self.hardware_acceleration = hardware_acceleration
         self._capture: Any = None
+        self._rtsp_source: FfmpegRtspFrameSource | None = None
 
     def open(self) -> None:
+        if self._is_rtsp_source():
+            if self._rtsp_source is not None:
+                self._rtsp_source.close()
+            self._rtsp_source = FfmpegRtspFrameSource(
+                self.source,
+                ffmpeg_binary=self.ffmpeg_binary,
+                read_timeout_seconds=self.read_timeout_milliseconds / 1000,
+                hardware_acceleration=self.hardware_acceleration,
+            )
+            self._rtsp_source.open()
+            return
+
         self._capture = cv2.VideoCapture()
-        self._configure_rtsp_capture_options()
-        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, self.capture_buffer_size)
         self._capture.set(
             cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.open_timeout_milliseconds
         )
@@ -51,6 +60,12 @@ class OpenCvFrameSource:
         self._discard_warmup_frames()
 
     def read(self) -> Any:
+        if self._is_rtsp_source():
+            if self._rtsp_source is None:
+                self.open()
+            assert self._rtsp_source is not None
+            return self._rtsp_source.read()
+
         if self._capture is None:
             self.open()
 
@@ -78,21 +93,18 @@ class OpenCvFrameSource:
         )
 
     def close(self) -> None:
+        if self._rtsp_source is not None:
+            self._rtsp_source.close()
+            self._rtsp_source = None
+
         if self._capture is not None:
             self._capture.release()
             self._capture = None
 
-    def _configure_rtsp_capture_options(self) -> None:
-        if not self.source.lower().startswith("rtsp://"):
-            return
-        os.environ.setdefault(
-            "OPENCV_FFMPEG_CAPTURE_OPTIONS", RTSP_FFMPEG_CAPTURE_OPTIONS
-        )
+    def _is_rtsp_source(self) -> bool:
+        return self.source.lower().startswith("rtsp://")
 
     def _open_capture(self) -> None:
-        if self.source.lower().startswith("rtsp://"):
-            self._capture.open(self.source, cv2.CAP_FFMPEG)
-            return
         self._capture.open(self.source)
 
     def _discard_warmup_frames(self) -> None:

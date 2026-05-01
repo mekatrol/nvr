@@ -1,14 +1,13 @@
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import cv2
 import numpy as np
 import yaml
 
+from nvr_background.pipeline.ffmpeg_rtsp_frame_source import FfmpegRtspFrameSource
 from nvr_background.pipeline.opencv_frame_source import OpenCvFrameSource
 from nvr_common.config import Config
 from nvr_web.debug_api_state import DebugApiState
@@ -99,23 +98,23 @@ class DebugApiTest(unittest.TestCase):
             self.assertEqual([], debug_state["records"])
             self.assertIn("Dropping bad pipeline frame", logger.warnings[0])
 
-    def test_opencv_frame_source_defaults_rtsp_to_strict_ffmpeg_options(self):
-        original_options = os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
-        try:
-            frame_source = OpenCvFrameSource("rtsp://camera/stream")
-            frame_source._configure_rtsp_capture_options()
+    def test_ffmpeg_rtsp_frame_source_builds_keyframe_gpu_decode_command(self):
+        frame_source = FfmpegRtspFrameSource(
+            "rtsp://camera/stream",
+            ffmpeg_binary="/usr/bin/ffmpeg",
+            hardware_acceleration="auto",
+        )
 
-            options = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
-            self.assertIn("rtsp_transport;tcp", options)
-            self.assertIn("fflags;discardcorrupt+nobuffer", options)
-            self.assertIn("err_detect;explode", options)
-        finally:
-            if original_options is None:
-                os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
-            else:
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = original_options
+        command = frame_source._build_command()
 
-    def test_opencv_frame_source_reopens_once_after_failed_read(self):
+        self.assertIn("-hwaccel", command)
+        self.assertIn("auto", command)
+        self.assertIn("-skip_frame", command)
+        self.assertIn("nokey", command)
+        self.assertIn("-vcodec", command)
+        self.assertIn("mjpeg", command)
+
+    def test_opencv_frame_source_reopens_once_after_failed_file_read(self):
         captures = [
             FakeCvCapture([(False, None)]),
             FakeCvCapture(
@@ -127,14 +126,14 @@ class DebugApiTest(unittest.TestCase):
             "nvr_background.pipeline.opencv_frame_source.cv2.VideoCapture",
             side_effect=captures,
         ):
-            frame_source = OpenCvFrameSource("rtsp://camera/stream", warmup_frames=0)
+            frame_source = OpenCvFrameSource("file.mp4", warmup_frames=0)
             frame = frame_source.read()
 
         self.assertEqual((2, 3, 3), frame.shape)
         self.assertTrue(captures[0].released)
         self.assertTrue(captures[1].opened)
 
-    def test_opencv_frame_source_discards_startup_frames_and_returns_latest(self):
+    def test_opencv_frame_source_discards_file_startup_frames_and_returns_latest(self):
         frames = [
             (True, np.full((2, 3, 3), 10, dtype=np.uint8)),
             (True, np.full((2, 3, 3), 20, dtype=np.uint8)),
@@ -149,24 +148,54 @@ class DebugApiTest(unittest.TestCase):
             return_value=capture,
         ):
             frame_source = OpenCvFrameSource(
-                "rtsp://camera/stream", warmup_frames=2, read_drain_frames=3
+                "file.mp4", warmup_frames=2, read_drain_frames=3
             )
             frame = frame_source.read()
 
         self.assertEqual(40, int(frame[0, 0, 0]))
 
-    def test_opencv_frame_source_uses_ffmpeg_backend_for_rtsp(self):
-        capture = FakeCvCapture([(True, np.full((2, 3, 3), 40, dtype=np.uint8))])
+    def test_opencv_frame_source_uses_ffmpeg_source_for_rtsp(self):
+        rtsp_source = FakeRtspFrameSource()
 
         with patch(
-            "nvr_background.pipeline.opencv_frame_source.cv2.VideoCapture",
-            return_value=capture,
-        ):
-            frame_source = OpenCvFrameSource("rtsp://camera/stream", warmup_frames=0)
+            "nvr_background.pipeline.opencv_frame_source.FfmpegRtspFrameSource",
+            return_value=rtsp_source,
+        ) as frame_source_class:
+            frame_source = OpenCvFrameSource(
+                "rtsp://camera/stream",
+                ffmpeg_binary="/usr/bin/ffmpeg",
+            )
             frame = frame_source.read()
 
         self.assertEqual(40, int(frame[0, 0, 0]))
-        self.assertEqual(cv2.CAP_FFMPEG, capture.backend)
+        self.assertTrue(rtsp_source.opened)
+        frame_source_class.assert_called_once_with(
+            "rtsp://camera/stream",
+            ffmpeg_binary="/usr/bin/ffmpeg",
+            read_timeout_seconds=5.0,
+            hardware_acceleration="auto",
+        )
+
+    def test_opencv_frame_source_can_disable_rtsp_hardware_acceleration(self):
+        rtsp_source = FakeRtspFrameSource()
+
+        with patch(
+            "nvr_background.pipeline.opencv_frame_source.FfmpegRtspFrameSource",
+            return_value=rtsp_source,
+        ) as frame_source_class:
+            frame_source = OpenCvFrameSource(
+                "rtsp://camera/stream",
+                hardware_acceleration=None,
+            )
+            frame = frame_source.read()
+
+        self.assertEqual(40, int(frame[0, 0, 0]))
+        frame_source_class.assert_called_once_with(
+            "rtsp://camera/stream",
+            ffmpeg_binary="ffmpeg",
+            read_timeout_seconds=5.0,
+            hardware_acceleration=None,
+        )
 
     def test_config_creates_pipeline_storage_directory_on_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -715,13 +744,15 @@ class FakeCvCapture:
         self.released = False
         self.grabs = 0
         self.backend = None
+        self.open_parameters = []
 
     def set(self, *_args):
         return True
 
-    def open(self, _source, backend=None):
+    def open(self, _source, backend=None, open_parameters=None):
         self.opened = True
         self.backend = backend
+        self.open_parameters = open_parameters or []
         return True
 
     def isOpened(self):
@@ -739,6 +770,21 @@ class FakeCvCapture:
     def release(self):
         self.released = True
         self.opened = False
+
+
+class FakeRtspFrameSource:
+    def __init__(self):
+        self.opened = False
+        self.closed = False
+
+    def open(self):
+        self.opened = True
+
+    def read(self):
+        return np.full((2, 3, 3), 40, dtype=np.uint8)
+
+    def close(self):
+        self.closed = True
 
 
 if __name__ == "__main__":

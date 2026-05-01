@@ -27,7 +27,8 @@ class CameraPipelineWorker(threading.Thread):
             self.config.get_pipeline_frame_interval_seconds(camera_id) or 1.0
         )
         self.frame_source = frame_source or OpenCvFrameSource(
-            self.camera_config[Config.KEY_CAMERA_RTSP_URL]
+            self.camera_config[Config.KEY_CAMERA_RTSP_URL],
+            ffmpeg_binary=self.config.get(Config.KEY_FFMPEG_BINARY, "ffmpeg"),
         )
         self.logger = logger
         self.stop_event = threading.Event()
