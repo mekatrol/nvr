@@ -5,6 +5,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 from nvr_common.pipeline.pipeline_stage_config import PipelineStageConfig
 
 
@@ -16,17 +17,28 @@ class PipelineStageLoader:
                 f"{stage_config.pipeline} and is not directly loadable"
             )
 
+        stage_class = self.load_stage_class(stage_config)
+        stage = stage_class(stage_config.config)
+        if not isinstance(stage, PipelineStage):
+            raise TypeError(
+                f"stage {stage_config.id} must inherit PipelineStage"
+            )
+        return stage
+
+    def load_features(self, stage_config: PipelineStageConfig) -> list[str]:
+        stage = self.load(stage_config)
+        return sorted(feature.value for feature in stage.get_features())
+
+    def load_stage_class(self, stage_config: PipelineStageConfig) -> type[Any]:
         if stage_config.filename:
             module = self._load_module_from_filename(stage_config.filename)
             class_name = stage_config.class_name or self._infer_class_name(
                 stage_config.filename
             )
-            stage_class = getattr(module, class_name)
-            return stage_class(stage_config.config)
+            return getattr(module, class_name)
 
         module = import_module(stage_config.module)
-        stage_class = getattr(module, stage_config.class_name)
-        return stage_class(stage_config.config)
+        return getattr(module, stage_config.class_name)
 
     @staticmethod
     def _load_module_from_filename(filename: str) -> Any:

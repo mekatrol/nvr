@@ -5,9 +5,10 @@ from typing import Any
 import cv2
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class ResizeStage:
+class ResizeStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         self.width = self._read_int(config, "width", minimum=1)
         height = config.get("height")

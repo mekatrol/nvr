@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 from nvr_common.config import Config
-from nvr_common.pipeline import PipelineGraph
+from nvr_common.pipeline import PipelineGraph, PipelineStageLoader
 
 
 class PipelinesStore:
@@ -27,6 +27,7 @@ class PipelinesStore:
         self.pipelines_path = self.pipelines_dir / "pipelines.yaml"
         self.deployed_path = config.get_deployed_pipelines_path()
         self.pipeline_conf_path = config.get_pipeline_config_path()
+        self.stage_loader = PipelineStageLoader()
         self._logged_missing_stage_files: set[tuple[str, str, str, str]] = set()
         self.pipelines_dir.mkdir(parents=True, exist_ok=True)
         self.deployed_dir.mkdir(parents=True, exist_ok=True)
@@ -220,6 +221,11 @@ class PipelinesStore:
             else pipelines_config
         )
         graph = Config._parse_pipelines(graph_config)
+        feature_stages = self._feature_stage_configs(
+            pipelines_config,
+            yaml_path,
+            allowed_root,
+        )
         self._log_info(
             "Parsed pipeline response: %s pipelines",
             len(graph.pipelines),
@@ -258,6 +264,9 @@ class PipelinesStore:
                             "class_name": stage.class_name,
                             "filename": stage.filename,
                             "pipeline": stage.pipeline,
+                            "features": self._stage_features(
+                                feature_stages.get((pipeline.id, stage.id), stage)
+                            ),
                             "config": deepcopy(stage.config),
                         }
                         for stage in pipeline.stages
@@ -266,6 +275,43 @@ class PipelinesStore:
                 for pipeline in graph.pipelines
             ],
         }
+
+    def _feature_stage_configs(
+        self,
+        pipelines_config: dict[str, Any],
+        yaml_path: Path,
+        allowed_root: Path,
+    ) -> dict[tuple[str, str], Any]:
+        try:
+            feature_config = self._expand_pipeline_config_paths(
+                pipelines_config,
+                yaml_path,
+                allowed_root,
+                resolve_stage_filenames=True,
+            )
+            feature_graph = Config._parse_pipelines(feature_config)
+        except Exception as ex:
+            self._log_warning("Pipeline stage features unavailable: %s", ex)
+            return {}
+
+        return {
+            (pipeline.id, stage.id): stage
+            for pipeline in feature_graph.pipelines
+            for stage in pipeline.stages
+        }
+
+    def _stage_features(self, stage: Any) -> list[str]:
+        if stage.pipeline:
+            return []
+        try:
+            return self.stage_loader.load_features(stage)
+        except Exception as ex:
+            self._log_warning(
+                "Pipeline stage features unavailable: stage=%s error=%s",
+                stage.id,
+                ex,
+            )
+            return []
 
     def pipeline_file_tree(self) -> list[dict[str, Any]]:
         return self._directory_tree(self.pipelines_dir)
@@ -656,10 +702,10 @@ from typing import Any
 
 import cv2
 
-from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline import PipelineContext, PipelineStage, PipelineStageResult
 
 
-class ExampleResizeStage:
+class ExampleResizeStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         self.output_width = self._read_size(config, "output_width")
         self.output_height = self._read_size(config, "output_height")

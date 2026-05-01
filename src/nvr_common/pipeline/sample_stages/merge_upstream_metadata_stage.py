@@ -4,9 +4,10 @@ from copy import deepcopy
 from typing import Any
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class MergeUpstreamMetadataStage:
+class MergeUpstreamMetadataStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         metadata_keys = config.get("metadata_keys")
         if metadata_keys is not None and (

@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class MetadataAnnotationStage:
+class MetadataAnnotationStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         metadata = config.get("metadata", {})
         if not isinstance(metadata, dict):

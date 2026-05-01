@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class ApproachDirectionStage:
+class ApproachDirectionStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         self.direction = config.get("direction", "down")
         self.min_delta = float(config.get("min_delta", 1.0))

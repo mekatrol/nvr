@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class MovementTrackerStage:
+class MovementTrackerStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         self.default_track_id = config.get("default_track_id", "person-0")
         if not isinstance(self.default_track_id, str):

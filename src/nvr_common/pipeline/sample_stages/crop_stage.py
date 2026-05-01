@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class CropStage:
+class CropStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         self.x = self._read_int(config, "x")
         self.y = self._read_int(config, "y")

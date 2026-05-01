@@ -18,6 +18,7 @@ type Stage = {
   class_name?: string
   filename?: string | null
   pipeline?: string | null
+  features?: string[]
   config: Record<string, unknown>
 }
 
@@ -153,6 +154,7 @@ const maskPreviewImage = ref<HTMLImageElement | null>(null)
 const maskDraftPolygon = ref<MaskPoint[]>([])
 const expandedPreview = ref<'input' | 'output' | null>(null)
 const ignoreNextMaskClick = ref(false)
+const allowPolygonsFeature = 'AllowPolygons'
 const vscodeWebUrl = computed(
   () =>
     import.meta.env.VITE_VSCODE_WEB_URL ||
@@ -208,10 +210,7 @@ const hasPipelinesStage = computed(() => Boolean(selectedPipelinesStage.value))
 const isSelectedMaskStage = computed(() => {
   const stage = selectedPipelinesStage.value
   if (!stage) return false
-  return (
-    stage.class_name === 'MaskStage' ||
-    Boolean(stage.filename?.endsWith('mask_stage.py'))
-  )
+  return stage.features?.includes(allowPolygonsFeature) ?? false
 })
 const canRun = computed(
   () =>
@@ -590,23 +589,6 @@ function addStage() {
     config: { metadata: {} },
   })
   selectStage(baseId)
-}
-
-function addMaskStage() {
-  if (!selectedPipelinesPipeline.value) return
-  const baseId = uniqueId(
-    'mask',
-    selectedPipelinesPipeline.value.stages.map((stage) => stage.id),
-  )
-  selectedPipelinesPipeline.value.stages.push({
-    id: baseId,
-    enabled: true,
-    filename: 'mask_stage.py',
-    class_name: 'MaskStage',
-    config: { polygons: [] },
-  })
-  selectStage(baseId)
-  currentView.value = 'debug'
 }
 
 function addStageToPipeline(pipelineId: string) {
@@ -1681,7 +1663,6 @@ onBeforeUnmount(() => {
                   <strong>Stages</strong>
                   <div class="editor-header-actions">
                     <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
-                    <button :disabled="!canApplyPipeline" @click="addMaskStage">Mask</button>
                   </div>
                 </header>
                 <button

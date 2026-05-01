@@ -1,7 +1,8 @@
 from nvr_common.pipeline import PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class MetadataStage:
+class MetadataStage(PipelineStage):
     def __init__(self, config):
         self.config = config
 

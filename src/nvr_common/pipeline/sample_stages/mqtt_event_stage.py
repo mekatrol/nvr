@@ -5,9 +5,10 @@ import time
 from typing import Any
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class MqttEventStage:
+class MqttEventStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         self.topic = self._required_string(config, "topic")
         self.host = self._required_string(config, "host")

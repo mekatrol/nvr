@@ -4,9 +4,10 @@ from copy import deepcopy
 from typing import Any
 
 from nvr_common.pipeline import PipelineContext, PipelineStageResult
+from nvr_common.pipeline.pipeline_stage import PipelineStage
 
 
-class SyntheticPersonDetectorStage:
+class SyntheticPersonDetectorStage(PipelineStage):
     def __init__(self, config: dict[str, Any]) -> None:
         self.configured_detections = config.get("detections")
         self.model_path = config.get("model_path")
