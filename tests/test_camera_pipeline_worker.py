@@ -95,7 +95,7 @@ class CameraPipelineWorkerTest(unittest.TestCase):
             logger = FakeLogger()
 
             worker = CameraPipelineWorker(
-                "driveway", frame_source=GreenFrameSource(), logger=logger
+                "driveway", frame_source=EmptyFrameSource(), logger=logger
             )
             outputs = worker.run_once()
 
@@ -103,13 +103,10 @@ class CameraPipelineWorkerTest(unittest.TestCase):
             self.assertIsNone(worker.last_outputs)
             self.assertIn("Dropping bad pipeline frame", logger.warnings[0])
 
-class GreenFrameSource:
+
+class EmptyFrameSource:
     def read(self):
-        frame = np.zeros((80, 100, 3), dtype=np.uint8)
-        frame[:, :30] = [70, 70, 70]
-        frame[:, 30:55] = [245, 245, 245]
-        frame[:, 55:] = [0, 120, 0]
-        return frame
+        return np.array([], dtype=np.uint8)
 
 
 class FakeLogger:

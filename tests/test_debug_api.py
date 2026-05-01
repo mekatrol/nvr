@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import cv2
 import numpy as np
 import yaml
 
@@ -80,7 +81,7 @@ class DebugApiTest(unittest.TestCase):
             logger = FakeLogger()
             config = self._config(Path(temp_dir))
             TestableDebugApiHandler.api_state = DebugApiState(
-                config, GreenFrameSource, logger=logger
+                config, EmptyFrameSource, logger=logger
             )
 
             run_handler = TestableDebugApiHandler(
@@ -98,16 +99,16 @@ class DebugApiTest(unittest.TestCase):
             self.assertEqual([], debug_state["records"])
             self.assertIn("Dropping bad pipeline frame", logger.warnings[0])
 
-    def test_opencv_frame_source_defaults_rtsp_to_tcp_transport(self):
+    def test_opencv_frame_source_defaults_rtsp_to_strict_ffmpeg_options(self):
         original_options = os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
         try:
             frame_source = OpenCvFrameSource("rtsp://camera/stream")
-            frame_source._configure_rtsp_transport()
+            frame_source._configure_rtsp_capture_options()
 
-            self.assertEqual(
-                "rtsp_transport;tcp",
-                os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"),
-            )
+            options = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
+            self.assertIn("rtsp_transport;tcp", options)
+            self.assertIn("fflags;discardcorrupt+nobuffer", options)
+            self.assertIn("err_detect;explode", options)
         finally:
             if original_options is None:
                 os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
@@ -126,7 +127,7 @@ class DebugApiTest(unittest.TestCase):
             "nvr_background.pipeline.opencv_frame_source.cv2.VideoCapture",
             side_effect=captures,
         ):
-            frame_source = OpenCvFrameSource("rtsp://camera/stream")
+            frame_source = OpenCvFrameSource("rtsp://camera/stream", warmup_frames=0)
             frame = frame_source.read()
 
         self.assertEqual((2, 3, 3), frame.shape)
@@ -138,6 +139,7 @@ class DebugApiTest(unittest.TestCase):
             (True, np.full((2, 3, 3), 10, dtype=np.uint8)),
             (True, np.full((2, 3, 3), 20, dtype=np.uint8)),
             (True, np.full((2, 3, 3), 30, dtype=np.uint8)),
+            (True, np.full((2, 3, 3), 40, dtype=np.uint8)),
             (False, None),
         ]
         capture = FakeCvCapture(frames)
@@ -147,12 +149,24 @@ class DebugApiTest(unittest.TestCase):
             return_value=capture,
         ):
             frame_source = OpenCvFrameSource(
-                "rtsp://camera/stream", warmup_frames=4, read_drain_frames=3
+                "rtsp://camera/stream", warmup_frames=2, read_drain_frames=3
             )
             frame = frame_source.read()
 
-        self.assertEqual(4, capture.grabs)
-        self.assertEqual(30, int(frame[0, 0, 0]))
+        self.assertEqual(40, int(frame[0, 0, 0]))
+
+    def test_opencv_frame_source_uses_ffmpeg_backend_for_rtsp(self):
+        capture = FakeCvCapture([(True, np.full((2, 3, 3), 40, dtype=np.uint8))])
+
+        with patch(
+            "nvr_background.pipeline.opencv_frame_source.cv2.VideoCapture",
+            return_value=capture,
+        ):
+            frame_source = OpenCvFrameSource("rtsp://camera/stream", warmup_frames=0)
+            frame = frame_source.read()
+
+        self.assertEqual(40, int(frame[0, 0, 0]))
+        self.assertEqual(cv2.CAP_FFMPEG, capture.backend)
 
     def test_config_creates_pipeline_storage_directory_on_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -675,16 +689,12 @@ class CountingFrameSource:
         self.closed = True
 
 
-class GreenFrameSource:
+class EmptyFrameSource:
     def __init__(self, source):
         self.source = source
 
     def read(self):
-        frame = np.zeros((80, 100, 3), dtype=np.uint8)
-        frame[:, :30] = [70, 70, 70]
-        frame[:, 30:55] = [245, 245, 245]
-        frame[:, 55:] = [0, 120, 0]
-        return frame
+        return np.array([], dtype=np.uint8)
 
     def close(self):
         return None
@@ -704,12 +714,14 @@ class FakeCvCapture:
         self.opened = False
         self.released = False
         self.grabs = 0
+        self.backend = None
 
     def set(self, *_args):
         return True
 
-    def open(self, _source):
+    def open(self, _source, backend=None):
         self.opened = True
+        self.backend = backend
         return True
 
     def isOpened(self):
