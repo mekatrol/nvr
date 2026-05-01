@@ -166,9 +166,9 @@ const selectedCamera = computed(() =>
 )
 
 const latestRecord = computed(() => debugState.value.records?.at(-1))
-const stagePreviewRecord = computed(() => {
+const selectedStagePreviewRecord = computed(() => {
   const records = debugState.value.records ?? []
-  if (!selectedPipelineId.value || !selectedStageId.value) return latestRecord.value
+  if (!selectedPipelineId.value || !selectedStageId.value) return undefined
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const record = records[index]
     if (
@@ -178,8 +178,9 @@ const stagePreviewRecord = computed(() => {
       return record
     }
   }
-  return latestRecord.value
+  return undefined
 })
+const stagePreviewRecord = computed(() => selectedStagePreviewRecord.value ?? latestRecord.value)
 const hasPipelineIntegrityProblem = computed(() => !pipelineIntegrity.value.ok)
 
 const filteredLogEntries = computed(() => {
@@ -209,7 +210,6 @@ const isSelectedMaskStage = computed(() => {
   if (!stage) return false
   return (
     stage.class_name === 'MaskStage' ||
-    stage.module === 'nvr_common.pipeline.sample_stages.mask_stage' ||
     Boolean(stage.filename?.endsWith('mask_stage.py'))
   )
 })
@@ -231,14 +231,14 @@ const canStep = computed(
 const canEditPipelines = computed(() => !isRunLoopActive.value && !isActionBusy.value)
 const canApplyPipeline = computed(() => canEditPipelines.value && hasPipelinesPipeline.value)
 const canApplyStage = computed(() => canEditPipelines.value && hasPipelinesStage.value)
-const maskPreviewShape = computed(() => stagePreviewRecord.value?.input_shape ?? null)
+const maskPreviewShape = computed(() => selectedStagePreviewRecord.value?.input_shape ?? null)
 const maskFrameWidth = computed(() => maskPreviewShape.value?.[1] ?? 0)
 const maskFrameHeight = computed(() => maskPreviewShape.value?.[0] ?? 0)
 const canDraftMask = computed(
   () =>
     hasPipelinesStage.value &&
     isSelectedMaskStage.value &&
-    Boolean(stagePreviewRecord.value?.input_preview) &&
+    Boolean(selectedStagePreviewRecord.value?.input_preview) &&
     maskFrameWidth.value > 0 &&
     maskFrameHeight.value > 0,
 )
@@ -601,7 +601,7 @@ function addMaskStage() {
   selectedPipelinesPipeline.value.stages.push({
     id: baseId,
     enabled: true,
-    module: 'nvr_common.pipeline.sample_stages.mask_stage',
+    filename: 'mask_stage.py',
     class_name: 'MaskStage',
     config: { polygons: [] },
   })

@@ -480,9 +480,7 @@ class DebugApiTest(unittest.TestCase):
                                         {
                                             "id": "polygon-mask",
                                             "enabled": True,
-                                            "module": (
-                                                "nvr_common.pipeline.sample_stages.mask_stage"
-                                            ),
+                                            "filename": "mask_stage.py",
                                             "class": "MaskStage",
                                             "config": {
                                                 "polygons": [
