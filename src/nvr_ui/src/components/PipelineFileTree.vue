@@ -1,3 +1,27 @@
+<template>
+  <div class="pipeline-file-tree" :style="{ '--depth': depth ?? 0 }">
+    <div v-for="node in nodes" :key="node.path" class="pipeline-file-node">
+      <div
+        class="pipeline-file-row"
+        :class="{ selectable: isYamlFile(node) }"
+        :title="node.path"
+        @dblclick="openNode(node)"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">
+          {{ fileIcon(node) }}
+        </span>
+        <span class="pipeline-file-label">{{ node.name }}</span>
+      </div>
+      <PipelineFileTree
+        v-if="node.children.length > 0"
+        :nodes="node.children"
+        :depth="(depth ?? 0) + 1"
+        @open-yaml="emit('openYaml', $event)"
+      />
+    </div>
+  </div>
+</template>
+
 <script setup lang="ts">
 type PipelineFileTreeNode = {
   type: 'directory' | 'file'
@@ -31,30 +55,6 @@ function openNode(node: PipelineFileTreeNode) {
   }
 }
 </script>
-
-<template>
-  <div class="pipeline-file-tree" :style="{ '--depth': depth ?? 0 }">
-    <div v-for="node in nodes" :key="node.path" class="pipeline-file-node">
-      <div
-        class="pipeline-file-row"
-        :class="{ selectable: isYamlFile(node) }"
-        :title="node.path"
-        @dblclick="openNode(node)"
-      >
-        <span class="material-symbols-outlined" aria-hidden="true">
-          {{ fileIcon(node) }}
-        </span>
-        <span class="pipeline-file-label">{{ node.name }}</span>
-      </div>
-      <PipelineFileTree
-        v-if="node.children.length > 0"
-        :nodes="node.children"
-        :depth="(depth ?? 0) + 1"
-        @open-yaml="emit('openYaml', $event)"
-      />
-    </div>
-  </div>
-</template>
 
 <style scoped>
 .pipeline-file-tree {

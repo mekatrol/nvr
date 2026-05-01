@@ -40,6 +40,10 @@
 - No gradients in icons, graphics, UI unless asked.
 - No spin controls for float input. Use validated text input.
 
+## Vue
+
+- Order Vue SFC blocks as `template`, then `script`, then `style`.
+
 ## Checks
 
 Run before handoff after Python changes:

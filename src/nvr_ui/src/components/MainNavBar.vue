@@ -1,11 +1,3 @@
-<script setup lang="ts">
-const navItems = [
-  { to: '/', label: 'Debugger', icon: 'bug_report' },
-  { to: '/editor', label: 'Editor', icon: 'edit_note' },
-  { to: '/log', label: 'Log', icon: 'article' },
-] as const
-</script>
-
 <template>
   <nav class="main-nav-bar" aria-label="Primary navigation">
     <RouterLink v-for="item in navItems" :key="item.to" :to="item.to">
@@ -14,6 +6,14 @@ const navItems = [
     </RouterLink>
   </nav>
 </template>
+
+<script setup lang="ts">
+const navItems = [
+  { to: '/', label: 'Debugger', icon: 'bug_report' },
+  { to: '/editor', label: 'Editor', icon: 'edit_note' },
+  { to: '/log', label: 'Log', icon: 'article' },
+] as const
+</script>
 
 <style scoped>
 .main-nav-bar {

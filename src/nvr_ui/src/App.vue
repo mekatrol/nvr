@@ -1,13 +1,3 @@
-<script setup lang="ts">
-import DebuggerView from './components/DebuggerView.vue'
-import EditorView from './components/EditorView.vue'
-import LogView from './components/LogView.vue'
-import MainNavBar from './components/MainNavBar.vue'
-import { useNvrAppState } from './composables/useNvrAppState'
-
-const { isEditorRoute, isLogRoute } = useNvrAppState()
-</script>
-
 <template>
   <div class="app-layout">
     <aside class="app-sidebar">
@@ -22,6 +12,16 @@ const { isEditorRoute, isLogRoute } = useNvrAppState()
     </main>
   </div>
 </template>
+
+<script setup lang="ts">
+import DebuggerView from './components/DebuggerView.vue'
+import EditorView from './components/EditorView.vue'
+import LogView from './components/LogView.vue'
+import MainNavBar from './components/MainNavBar.vue'
+import { useNvrAppState } from './composables/useNvrAppState'
+
+const { isEditorRoute, isLogRoute } = useNvrAppState()
+</script>
 
 <style scoped>
 :global(*) {

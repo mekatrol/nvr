@@ -1,18 +1,3 @@
-<script setup lang="ts">
-import { useNvrAppState } from '@/composables/useNvrAppState'
-
-const {
-  apiError,
-  logEntries,
-  selectedLogSeverities,
-  isLoadingLogs,
-  filteredLogEntries,
-  logSeverityOptions,
-  loadLogs,
-  clearLogs,
-} = useNvrAppState()
-</script>
-
 <template>
   <section class="log-shell">
     <header class="log-header">
@@ -60,6 +45,21 @@ const {
     </section>
   </section>
 </template>
+
+<script setup lang="ts">
+import { useNvrAppState } from '@/composables/useNvrAppState'
+
+const {
+  apiError,
+  logEntries,
+  selectedLogSeverities,
+  isLoadingLogs,
+  filteredLogEntries,
+  logSeverityOptions,
+  loadLogs,
+  clearLogs,
+} = useNvrAppState()
+</script>
 
 <style scoped>
 .log-shell {

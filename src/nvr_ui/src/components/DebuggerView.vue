@@ -1,43 +1,3 @@
-<script setup lang="ts">
-import StagePreview from './StagePreview.vue'
-import { useNvrAppState } from '@/composables/useNvrAppState'
-
-const {
-  cameras,
-  selectedCameraId,
-  pipelines,
-  debugState,
-  selectedBreakpoint,
-  apiError,
-  isLoadingCameras,
-  pipelineIntegrity,
-  deployStatus,
-  debugPipelineId,
-  selectedStageId,
-  materialIcons,
-  selectedCamera,
-  selectedDebugPipeline,
-  selectedDebugPipelineStages,
-  hasPipelineIntegrityProblem,
-  isActionBusy,
-  isRunLoopActive,
-  canRun,
-  canStop,
-  canStep,
-  canSetBreakpoint,
-  loadCameras,
-  reloadPipelines,
-  runDebuggerCommand,
-  stopDebuggerRun,
-  startRunLoop,
-  toggleBreakpoint,
-  refreshCamera,
-  withAction,
-  selectDebugPipeline,
-  selectDebugStage,
-} = useNvrAppState()
-</script>
-
 <template>
   <section class="shell">
     <section class="workspace">
@@ -186,6 +146,46 @@ const {
     </section>
   </section>
 </template>
+
+<script setup lang="ts">
+import StagePreview from './StagePreview.vue'
+import { useNvrAppState } from '@/composables/useNvrAppState'
+
+const {
+  cameras,
+  selectedCameraId,
+  pipelines,
+  debugState,
+  selectedBreakpoint,
+  apiError,
+  isLoadingCameras,
+  pipelineIntegrity,
+  deployStatus,
+  debugPipelineId,
+  selectedStageId,
+  materialIcons,
+  selectedCamera,
+  selectedDebugPipeline,
+  selectedDebugPipelineStages,
+  hasPipelineIntegrityProblem,
+  isActionBusy,
+  isRunLoopActive,
+  canRun,
+  canStop,
+  canStep,
+  canSetBreakpoint,
+  loadCameras,
+  reloadPipelines,
+  runDebuggerCommand,
+  stopDebuggerRun,
+  startRunLoop,
+  toggleBreakpoint,
+  refreshCamera,
+  withAction,
+  selectDebugPipeline,
+  selectDebugStage,
+} = useNvrAppState()
+</script>
 
 <style scoped>
 .shell {

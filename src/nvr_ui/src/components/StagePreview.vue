@@ -1,24 +1,3 @@
-<script setup lang="ts">
-import { useNvrAppState } from '@/composables/useNvrAppState'
-
-const {
-  materialIcons,
-  stagePreviewRecord,
-  expandedPreview,
-  maskPreviewImage,
-  canDraftMask,
-  maskFrameWidth,
-  maskFrameHeight,
-  maskPolygons,
-  maskDraftPolygon,
-  hasMaskDraftArea,
-  togglePreviewExpansion,
-  handleMaskPreviewClick,
-  handleMaskPreviewDoubleClick,
-  maskPolygonPoints,
-} = useNvrAppState()
-</script>
-
 <template>
   <section class="stage-preview" aria-label="Stage image preview">
     <header class="stage-preview-header">
@@ -130,6 +109,27 @@ const {
     </div>
   </section>
 </template>
+
+<script setup lang="ts">
+import { useNvrAppState } from '@/composables/useNvrAppState'
+
+const {
+  materialIcons,
+  stagePreviewRecord,
+  expandedPreview,
+  maskPreviewImage,
+  canDraftMask,
+  maskFrameWidth,
+  maskFrameHeight,
+  maskPolygons,
+  maskDraftPolygon,
+  hasMaskDraftArea,
+  togglePreviewExpansion,
+  handleMaskPreviewClick,
+  handleMaskPreviewDoubleClick,
+  maskPolygonPoints,
+} = useNvrAppState()
+</script>
 
 <style scoped>
 .stage-preview {

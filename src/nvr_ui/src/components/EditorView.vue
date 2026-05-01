@@ -1,18 +1,3 @@
-<script setup lang="ts">
-import { useNvrAppState } from '@/composables/useNvrAppState'
-
-const {
-  apiError,
-  deployStatus,
-  canEditPipelines,
-  vscodeWebUrl,
-  vscodeLoadFailed,
-  withAction,
-  generateExampleResizePipeline,
-  deployPipelinesFromEditor,
-} = useNvrAppState()
-</script>
-
 <template>
   <section class="vscode-shell">
     <header class="vscode-header">
@@ -52,6 +37,21 @@ const {
     </section>
   </section>
 </template>
+
+<script setup lang="ts">
+import { useNvrAppState } from '@/composables/useNvrAppState'
+
+const {
+  apiError,
+  deployStatus,
+  canEditPipelines,
+  vscodeWebUrl,
+  vscodeLoadFailed,
+  withAction,
+  generateExampleResizePipeline,
+  deployPipelinesFromEditor,
+} = useNvrAppState()
+</script>
 
 <style scoped>
 .vscode-shell {
