@@ -46,8 +46,6 @@ type DebugRecord = {
   output_shape: number[] | null
   input_preview: string | null
   output_preview: string | null
-  metadata_before: Record<string, unknown>
-  metadata_after: Record<string, unknown>
 }
 
 type DebugState = {
@@ -108,7 +106,6 @@ const defaultPipelineFrameIntervalSeconds = 0.5
 const selectedCameraId = ref('')
 const pipelines = ref<Pipeline[]>([])
 const debugState = ref<DebugState>({ status: 'idle', records: [] })
-const metadata = ref<Record<string, unknown>>({})
 const selectedBreakpoint = ref('')
 const apiError = ref('')
 const isLoadingCameras = ref(false)
@@ -149,6 +146,7 @@ const selectedCamera = computed(() =>
 const selectedDebugPipeline = computed(() =>
   pipelines.value.find((pipeline) => pipeline.id === debugPipelineId.value),
 )
+const selectedDebugPipelineStages = computed(() => selectedDebugPipeline.value?.stages ?? [])
 
 const latestRecord = computed(() => debugState.value.records?.at(-1))
 const selectedStagePreviewRecord = computed(() => {
@@ -171,10 +169,6 @@ const hasPipelineIntegrityProblem = computed(() => !pipelineIntegrity.value.ok)
 const filteredLogEntries = computed(() => {
   const selectedLevels = new Set(selectedLogSeverities.value)
   return logEntries.value.filter((entry) => selectedLevels.has(entry.level as LogSeverity))
-})
-
-const visiblePipelines = computed(() => {
-  return selectedDebugPipeline.value ? [selectedDebugPipeline.value] : []
 })
 
 const selectedPipelinesPipeline = computed(() =>
@@ -273,16 +267,24 @@ const loadPipelineConfigPipelines = async (): Promise<void> => {
   syncDebugPipelineSelection()
 }
 
+const reloadPipelines = async (): Promise<void> => {
+  await stopRunLoop(false)
+  await postJson<{ pipelines: Pipeline[]; integrity?: PipelineIntegrity }>(
+    '/api/pipelines/reload',
+    {},
+  )
+  await loadPipelines()
+  await loadPipelineConfigPipelines()
+  await loadDebugState()
+  deployStatus.value = 'Pipelines reloaded from disk'
+}
+
 const loadDebugState = async (): Promise<void> => {
   if (!selectedCameraId.value) return
   const pathQuery = pipelineConfigPathQuery()
   debugState.value = await getJson<DebugState>(
     `/api/debug/state?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`,
   )
-  const payload = await getJson<{ metadata: Record<string, unknown> }>(
-    `/api/debug/metadata?camera_id=${encodeURIComponent(selectedCameraId.value)}${pathQuery}`,
-  )
-  metadata.value = payload.metadata
 }
 
 const loadLogs = async (): Promise<void> => {
@@ -308,6 +310,7 @@ const runCommand = async (command: string): Promise<void> => {
     command,
   })
   await loadDebugState()
+  syncSelectionToLatestDebugRecord()
 }
 
 const runDebuggerCommand = async (command: string): Promise<void> => {
@@ -475,22 +478,10 @@ const selectPipeline = (pipelineId: string): void => {
   refreshSelectedEditors()
 }
 
-const selectStageInPipeline = (pipelineId: string, stageId: string): void => {
-  selectedPipelineId.value = pipelineId
-  selectedStageId.value = stageId
-  refreshSelectedEditors()
-}
-
 const refreshSelectedEditors = (): void => {
   const stage = selectedPipelinesStage.value
   selectedStageConfigJson.value = formatJson(stage?.config ?? {})
   maskDraftPolygon.value = []
-}
-
-const stageSummary = (stage: Stage): string => {
-  if (stage.pipeline) return `pipeline: ${stage.pipeline}`
-  if (stage.filename) return stage.filename
-  return stage.class_name || stage.module || 'stage'
 }
 
 const selectDebugPipeline = (pipelineId: string): void => {
@@ -502,6 +493,22 @@ const selectDebugPipeline = (pipelineId: string): void => {
   debugPipelineId.value = pipeline.id
   selectedPipelineId.value = pipeline.id
   selectedStageId.value = pipeline.stages[0]?.id ?? ''
+  refreshSelectedEditors()
+}
+
+const selectDebugStage = (stageId: string): void => {
+  selectedStageId.value = stageId
+  refreshSelectedEditors()
+}
+
+const syncSelectionToLatestDebugRecord = (): void => {
+  const record = debugState.value.records?.at(-1)
+  if (!record) return
+  const pipeline = pipelines.value.find((candidate) => candidate.id === record.pipeline_id)
+  if (!pipeline) return
+  debugPipelineId.value = pipeline.id
+  selectedPipelineId.value = pipeline.id
+  selectedStageId.value = record.stage_id
   refreshSelectedEditors()
 }
 
@@ -772,9 +779,24 @@ onBeforeUnmount(() => {
                   </option>
                 </select>
               </label>
+              <label class="ribbon-field">
+                <span>Stage</span>
+                <select v-model="selectedStageId"
+                  :disabled="hasPipelineIntegrityProblem || selectedDebugPipelineStages.length === 0"
+                  @change="selectDebugStage(selectedStageId)">
+                  <option v-if="selectedDebugPipelineStages.length === 0" value="">No stages loaded</option>
+                  <option v-for="stage in selectedDebugPipelineStages" :key="stage.id" :value="stage.id">
+                    {{ stage.id }}
+                  </option>
+                </select>
+              </label>
               <button class="refresh-button" :disabled="isActionBusy || isRunLoopActive"
                 @click="withAction('refresh_cameras', () => loadCameras().then(refreshCamera))">
                 Refresh
+              </button>
+              <button class="refresh-button" :disabled="isActionBusy || isRunLoopActive"
+                @click="withAction('reload_pipelines', reloadPipelines)">
+                Reload Pipeline
               </button>
             </div>
             <div class="ribbon-group">
@@ -942,29 +964,6 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <section class="graph">
-            <div v-for="pipeline in visiblePipelines" :key="pipeline.id" class="pipeline-card">
-              <header>
-                <strong>{{ pipeline.name || pipeline.id }}</strong>
-                <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
-              </header>
-              <button v-for="stage in pipeline.stages" :key="stage.id" class="stage-row" :class="{
-                selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId,
-              }" @click="selectStageInPipeline(pipeline.id, stage.id)">
-                <span>{{ stage.id }}</span>
-                <small>{{ stageSummary(stage) }}</small>
-              </button>
-            </div>
-          </section>
-
-          <section class="details">
-            <div class="metadata">
-              <header>
-                <strong>Metadata</strong>
-              </header>
-              <pre>{{ formatJson(metadata) }}</pre>
-            </div>
-          </section>
         </section>
       </section>
     </main>
@@ -1237,8 +1236,7 @@ button:disabled .material-symbols-outlined {
   font-size: 13px;
 }
 
-.refresh-button,
-.stage-row {
+.refresh-button {
   border: 1px solid #b8c2cc;
   border-radius: 6px;
   padding: 8px 10px;
@@ -1248,10 +1246,7 @@ button:disabled .material-symbols-outlined {
 }
 
 .pipeline-ribbon {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
+  display: grid;
   gap: 12px;
   border: 1px solid #d7dee7;
   border-radius: 8px;
@@ -1264,6 +1259,7 @@ button:disabled .material-symbols-outlined {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  width: 100%;
 }
 
 .ribbon-group button {
@@ -1281,7 +1277,7 @@ button:disabled .material-symbols-outlined {
 }
 
 .debugger-selectors {
-  flex: 1 1 480px;
+  justify-content: flex-start;
 }
 
 .breakpoint-ribbon {
@@ -1308,7 +1304,6 @@ button:disabled .material-symbols-outlined {
 
 .workspace {
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
   gap: 16px;
   padding: 18px;
 }
@@ -1332,84 +1327,11 @@ button:disabled .material-symbols-outlined {
   font-size: 13px;
 }
 
-.statusbar button,
-.pipeline-card-actions button {
-  border: 1px solid #b8c2cc;
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #ffffff;
-  color: #1f2933;
-  cursor: pointer;
-}
-
-.graph {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-}
-
-.pipeline-index {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
-  align-content: start;
-}
-
-.pipeline-card header div {
-  display: grid;
-  gap: 2px;
-}
-
-.pipeline-card header small {
-  color: #627386;
-}
-
-.stage-list {
-  display: grid;
-  gap: 8px;
-}
-
-.pipeline-card-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.pipeline-card {
-  display: grid;
-  gap: 8px;
-  border: 1px solid #d7dee7;
-  border-radius: 8px;
-  padding: 12px;
-  background: #ffffff;
-}
-
-.pipeline-card header,
-.stage-preview header,
-.metadata header {
+.stage-preview header {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   font-size: 13px;
-}
-
-.stage-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  text-align: left;
-}
-
-.stage-row small {
-  color: #627386;
-}
-
-.stage-row.selected {
-  border-color: #2563eb;
-  background: #eff6ff;
-}
-
-.stage-row.static {
-  cursor: default;
 }
 
 .editor {
@@ -1537,6 +1459,7 @@ button:disabled .material-symbols-outlined {
   position: fixed;
   z-index: 20;
   inset: 0;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   padding: 16px;
   background: #0f172a;
@@ -1551,21 +1474,6 @@ button:disabled .material-symbols-outlined {
   border-color: #506070;
   background: #18222f;
   color: #f8fafc;
-}
-
-.details {
-  display: grid;
-  min-height: 0;
-}
-
-.metadata {
-  display: grid;
-  gap: 10px;
-  min-height: 0;
-  border: 1px solid #d7dee7;
-  border-radius: 8px;
-  padding: 12px;
-  background: #ffffff;
 }
 
 .preview-surface {
@@ -1583,6 +1491,8 @@ button:disabled .material-symbols-outlined {
 
 .stage-preview-pane.expanded .preview-surface {
   min-height: 0;
+  width: 100%;
+  height: 100%;
   border-color: #334155;
   background: #020617;
   color: #cbd5e1;
@@ -1592,6 +1502,7 @@ button:disabled .material-symbols-outlined {
   position: relative;
   display: inline-grid;
   max-width: 100%;
+  max-height: 100%;
 }
 
 .mask-preview-frame.editable img {
@@ -1606,7 +1517,14 @@ button:disabled .material-symbols-outlined {
 }
 
 .stage-preview-pane.expanded .preview-surface img {
-  max-height: calc(100vh - 132px);
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+.stage-preview-pane.expanded .mask-preview-frame {
+  width: 100%;
+  height: 100%;
 }
 
 .mask-overlay {
@@ -1650,17 +1568,6 @@ button:disabled .material-symbols-outlined {
   justify-content: center;
   gap: 12px;
   font-size: 12px;
-}
-
-.metadata pre {
-  min-height: 0;
-  overflow: auto;
-  margin: 0;
-  border-radius: 6px;
-  padding: 12px;
-  background: #111827;
-  color: #e5e7eb;
-  font-size: 13px;
 }
 
 @media (max-width: 900px) {
@@ -1877,7 +1784,6 @@ button:disabled .material-symbols-outlined {
 
   .app-layout,
   .shell,
-  .details,
   .editor-grid {
     grid-template-columns: 1fr;
   }
