@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from email import policy
+from email.parser import BytesParser
+from io import BytesIO
 import json
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
@@ -46,8 +49,13 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/debug/state":
             camera_id = self._query_value(query, "camera_id")
             pipeline_config_path = self._query_value(query, "pipeline_config_path")
+            debug_source_id = self._query_value(query, "debug_source_id")
             try:
-                self._json(self._session_snapshot(camera_id, pipeline_config_path))
+                self._json(
+                    self._session_snapshot(
+                        camera_id, pipeline_config_path, debug_source_id
+                    )
+                )
             except ValueError as ex:
                 self._json({"error": str(ex)}, status=400)
             return
@@ -109,6 +117,14 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
             self._json(api_state.reload_pipelines())
             return
 
+        if parsed.path == "/api/debug/source-file":
+            try:
+                filename, source = self._read_multipart_file()
+                self._json(api_state.save_debug_source_file(filename, source))
+            except ValueError as ex:
+                self._json({"error": str(ex)}, status=400)
+            return
+
         if parsed.path == "/api/logs/clear":
             api_state.clear_logs()
             self._json({"entries": []})
@@ -116,10 +132,12 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/debug/breakpoints":
             body = self._read_json()
+            debug_source_id = self._body_string(body, "debug_source_id")
             try:
                 session = api_state.session(
                     body.get("camera_id", ""),
                     self._body_string(body, "pipeline_config_path"),
+                    debug_source_id,
                 )
             except ValueError as ex:
                 self._json({"error": str(ex)}, status=400)
@@ -142,8 +160,11 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/debug/command":
             body = self._read_json()
             pipeline_config_path = self._body_string(body, "pipeline_config_path")
+            debug_source_id = self._body_string(body, "debug_source_id")
             try:
-                session = api_state.session(body.get("camera_id", ""), pipeline_config_path)
+                session = api_state.session(
+                    body.get("camera_id", ""), pipeline_config_path, debug_source_id
+                )
             except ValueError as ex:
                 self._json({"error": str(ex)}, status=400)
                 return
@@ -154,7 +175,7 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
             if command == "run":
                 try:
                     session = api_state.load_camera_frame(
-                        body.get("camera_id", ""), pipeline_config_path
+                        body.get("camera_id", ""), pipeline_config_path, debug_source_id
                     )
                 except RuntimeError as ex:
                     self._json({"error": str(ex)}, status=502)
@@ -169,7 +190,9 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 if not session.has_pending_step():
                     try:
                         session = api_state.load_camera_frame(
-                            body.get("camera_id", ""), pipeline_config_path
+                            body.get("camera_id", ""),
+                            pipeline_config_path,
+                            debug_source_id,
                         )
                     except RuntimeError as ex:
                         self._json({"error": str(ex)}, status=502)
@@ -182,7 +205,9 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 if not session.has_pending_step():
                     try:
                         session = api_state.load_camera_frame(
-                            body.get("camera_id", ""), pipeline_config_path
+                            body.get("camera_id", ""),
+                            pipeline_config_path,
+                            debug_source_id,
                         )
                     except RuntimeError as ex:
                         self._json({"error": str(ex)}, status=502)
@@ -195,7 +220,9 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
                 if not session.has_pending_step():
                     try:
                         session = api_state.load_camera_frame(
-                            body.get("camera_id", ""), pipeline_config_path
+                            body.get("camera_id", ""),
+                            pipeline_config_path,
+                            debug_source_id,
                         )
                     except RuntimeError as ex:
                         self._json({"error": str(ex)}, status=502)
@@ -220,11 +247,16 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def _session_snapshot(
-        self, camera_id: str | None, pipeline_config_path: str | None = None
+        self,
+        camera_id: str | None,
+        pipeline_config_path: str | None = None,
+        debug_source_id: str | None = None,
     ) -> dict[str, Any]:
         if not camera_id:
             return {"status": "disabled", "records": []}
-        session = self._api_state().session(camera_id, pipeline_config_path)
+        session = self._api_state().session(
+            camera_id, pipeline_config_path, debug_source_id
+        )
         if session is None:
             return {"status": "disabled", "records": []}
         return session.snapshot()
@@ -240,6 +272,30 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
         if length == 0:
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def _read_multipart_file(self) -> tuple[str, BytesIO]:
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            raise ValueError("multipart form data is required")
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            raise ValueError("file is required")
+        raw_message = (
+            f"Content-Type: {content_type}\nMIME-Version: 1.0\n\n".encode("utf-8")
+            + self.rfile.read(length)
+        )
+        message = BytesParser(policy=policy.default).parsebytes(raw_message)
+        for part in message.iter_parts():
+            if part.get_content_disposition() != "form-data":
+                continue
+            if part.get_param("name", header="content-disposition") != "file":
+                continue
+            filename = part.get_filename()
+            payload = part.get_payload(decode=True)
+            if not filename or not payload:
+                raise ValueError("file is required")
+            return filename, BytesIO(payload)
+        raise ValueError("file is required")
 
     def _json(self, payload: dict[str, Any], status: int = 200) -> None:
         data = json.dumps(payload, default=list).encode("utf-8")

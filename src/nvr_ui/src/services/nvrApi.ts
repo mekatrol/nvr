@@ -1,5 +1,13 @@
-import { getJson, postJson } from './apiClient'
-import type { Camera, DebugState, LogEntry, Pipeline, PipelineIntegrity, PipelinesResponse } from '@/types/nvr'
+import { getJson, postForm, postJson } from './apiClient'
+import type {
+  Camera,
+  DebugSourceFile,
+  DebugState,
+  LogEntry,
+  Pipeline,
+  PipelineIntegrity,
+  PipelinesResponse,
+} from '@/types/nvr'
 
 type PipelineGraphResponse = {
   pipelines: Pipeline[]
@@ -25,9 +33,16 @@ export const nvrApi = {
     return postJson<PipelineGraphResponse>('/api/pipelines/reload', {})
   },
 
-  getDebugState: (cameraId: string, pipelineConfigPath: string): Promise<DebugState> => {
+  getDebugState: (
+    cameraId: string,
+    pipelineConfigPath: string,
+    debugSourceId = '',
+  ): Promise<DebugState> => {
     const query = pipelineConfigQuery(pipelineConfigPath)
-    return getJson<DebugState>(`/api/debug/state?camera_id=${encodeURIComponent(cameraId)}${query}`)
+    const sourceQuery = debugSourceQuery(debugSourceId)
+    return getJson<DebugState>(
+      `/api/debug/state?camera_id=${encodeURIComponent(cameraId)}${query}${sourceQuery}`,
+    )
   },
 
   getLogs: async (limit = 500): Promise<LogEntry[]> => {
@@ -44,11 +59,13 @@ export const nvrApi = {
     cameraId: string,
     pipelineConfigPath: string,
     command: string,
+    debugSourceId = '',
   ): Promise<DebugState> => {
     return postJson<DebugState>('/api/debug/command', {
       camera_id: cameraId,
       pipeline_config_path: pipelineConfigPath,
       command,
+      debug_source_id: debugSourceId,
     })
   },
 
@@ -58,6 +75,7 @@ export const nvrApi = {
     pipelineId: string,
     stageId: string | null,
     enabled: boolean,
+    debugSourceId = '',
   ): Promise<DebugState> => {
     return postJson<DebugState>('/api/debug/breakpoints', {
       camera_id: cameraId,
@@ -65,7 +83,14 @@ export const nvrApi = {
       pipeline_id: pipelineId,
       stage_id: stageId,
       enabled,
+      debug_source_id: debugSourceId,
     })
+  },
+
+  uploadDebugSourceFile: (file: File): Promise<DebugSourceFile> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return postForm<DebugSourceFile>('/api/debug/source-file', formData)
   },
 
   generateExampleResizePipeline: (): Promise<PipelinesResponse> => {
@@ -80,4 +105,9 @@ export const nvrApi = {
 const pipelineConfigQuery = (pipelineConfigPath: string): string => {
   if (!pipelineConfigPath) return ''
   return `&pipeline_config_path=${encodeURIComponent(pipelineConfigPath)}`
+}
+
+const debugSourceQuery = (debugSourceId: string): string => {
+  if (!debugSourceId) return ''
+  return `&debug_source_id=${encodeURIComponent(debugSourceId)}`
 }

@@ -11,6 +11,7 @@ import { nvrApi } from '@/services/nvrApi'
 import type {
   Camera,
   DebugRecord,
+  DebugSourceFile,
   DebugState,
   LogEntry,
   LogSeverity,
@@ -20,8 +21,10 @@ import type {
   PipelineIntegrity,
 } from '@/types/nvr'
 
+const DEBUG_FILE_CAMERA_ID = '__debug_file__'
 const cameras = ref<Camera[]>([])
 const selectedCameraId = ref('')
+const selectedDebugSourceFile = ref<DebugSourceFile | null>(null)
 const pipelines = ref<Pipeline[]>([])
 const debugState = ref<DebugState>({ status: 'idle', records: [] })
 const selectedBreakpoint = ref('')
@@ -58,6 +61,8 @@ export const useNvrAppState = () => {
   const selectedCamera = computed(() =>
     cameras.value.find((camera) => camera.id === selectedCameraId.value),
   )
+  const isDebugFileCameraSelected = computed(() => selectedCameraId.value === DEBUG_FILE_CAMERA_ID)
+  const selectedDebugSourceName = computed(() => selectedDebugSourceFile.value?.name ?? '')
   const selectedDebugPipeline = computed(() =>
     pipelines.value.find((pipeline) => pipeline.id === debugPipelineId.value),
   )
@@ -91,6 +96,9 @@ export const useNvrAppState = () => {
   )
   const isActionBusy = computed(() => currentAction.value.length > 0)
   const hasSelectedCamera = computed(() => selectedCameraId.value.length > 0)
+  const hasRunnableDebugSource = computed(
+    () => !isDebugFileCameraSelected.value || Boolean(selectedDebugSourceFile.value),
+  )
   const hasPipelinesStage = computed(() => Boolean(selectedPipelinesStage.value))
   const isSelectedMaskStage = computed(() => {
     const stage = selectedPipelinesStage.value
@@ -100,6 +108,7 @@ export const useNvrAppState = () => {
   const canRun = computed(
     () =>
       hasSelectedCamera.value &&
+      hasRunnableDebugSource.value &&
       !hasPipelineIntegrityProblem.value &&
       !isRunLoopActive.value &&
       !isActionBusy.value,
@@ -108,6 +117,7 @@ export const useNvrAppState = () => {
   const canStep = computed(
     () =>
       hasSelectedCamera.value &&
+      hasRunnableDebugSource.value &&
       !hasPipelineIntegrityProblem.value &&
       !isRunLoopActive.value &&
       !isActionBusy.value,
@@ -129,6 +139,7 @@ export const useNvrAppState = () => {
   const canSetBreakpoint = computed(
     () =>
       hasSelectedCamera.value &&
+      hasRunnableDebugSource.value &&
       !hasPipelineIntegrityProblem.value &&
       selectedBreakpoint.value.length > 0 &&
       !isRunLoopActive.value &&
@@ -136,8 +147,10 @@ export const useNvrAppState = () => {
   )
 
   const state = {
+    debugFileCameraId: DEBUG_FILE_CAMERA_ID,
     cameras,
     selectedCameraId,
+    selectedDebugSourceFile,
     pipelines,
     debugState,
     selectedBreakpoint,
@@ -164,6 +177,8 @@ export const useNvrAppState = () => {
     isEditorRoute,
     isLogRoute,
     selectedCamera,
+    isDebugFileCameraSelected,
+    selectedDebugSourceName,
     selectedDebugPipeline,
     selectedDebugPipelineStages,
     stagePreviewRecord,
@@ -196,6 +211,7 @@ export const useNvrAppState = () => {
     startRunLoop,
     toggleBreakpoint,
     refreshCamera,
+    uploadDebugSourceFile,
     withAction,
     generateExampleResizePipeline,
     deployPipelinesFromEditor,
@@ -316,6 +332,7 @@ const loadDebugState = async (): Promise<void> => {
     debugState.value = await nvrApi.getDebugState(
       selectedCameraId.value,
       selectedPipelineConfigPath.value,
+      currentDebugSourceId(),
     )
   } catch (error) {
     setApiError(error)
@@ -354,6 +371,7 @@ const runCommand = async (command: string): Promise<void> => {
       selectedCameraId.value,
       selectedPipelineConfigPath.value,
       command,
+      currentDebugSourceId(),
     )
     await loadDebugState()
     syncSelectionToLatestDebugRecord()
@@ -385,7 +403,7 @@ const startRunLoop = async (): Promise<void> => {
   if (!isRunLoopActive.value) return
   runLoopTimer.value = setInterval(() => {
     runLoopTick().catch(() => stopRunLoop(false))
-  }, DEFAULT_PIPELINE_FRAME_INTERVAL_SECONDS * 1000)
+  }, runLoopIntervalMilliseconds())
 }
 
 const runLoopTick = async (): Promise<void> => {
@@ -429,6 +447,7 @@ const toggleBreakpoint = async (enabled: boolean): Promise<void> => {
       pipelineId,
       stageId || null,
       enabled,
+      currentDebugSourceId(),
     )
   } catch (error) {
     setApiError(error)
@@ -448,6 +467,18 @@ const refreshCamera = async (): Promise<void> => {
   } catch {
     return
   }
+}
+
+const uploadDebugSourceFile = async (file: File): Promise<void> => {
+  if (currentAction.value.length > 0) return
+  await withAction('upload_debug_file', async () => {
+    await stopRunLoop(false)
+    apiError.value = ''
+    selectedCameraId.value = DEBUG_FILE_CAMERA_ID
+    selectedDebugSourceFile.value = await nvrApi.uploadDebugSourceFile(file)
+    await loadPipelines()
+    await loadDebugState()
+  })
 }
 
 const withAction = async <T>(action: string, task: () => Promise<T>): Promise<T | undefined> => {
@@ -701,4 +732,23 @@ const findSelectedStagePreviewRecord = (): DebugRecord | undefined => {
 
 const setApiError = (error: unknown): void => {
   apiError.value = error instanceof Error ? error.message : 'Unexpected NVR web API error'
+}
+
+const isDebugFileSelected = (): boolean => {
+  return selectedCameraId.value === DEBUG_FILE_CAMERA_ID
+}
+
+const currentDebugSourceId = (): string => {
+  return isDebugFileSelected() ? (selectedDebugSourceFile.value?.id ?? '') : ''
+}
+
+const runLoopIntervalMilliseconds = (): number => {
+  if (!isDebugFileSelected()) {
+    return DEFAULT_PIPELINE_FRAME_INTERVAL_SECONDS * 1000
+  }
+  const frameIntervalSeconds = selectedDebugSourceFile.value?.frame_interval_seconds
+  if (!Number.isFinite(frameIntervalSeconds) || !frameIntervalSeconds) {
+    return 0
+  }
+  return Math.max(1, Math.round(frameIntervalSeconds * 1000))
 }

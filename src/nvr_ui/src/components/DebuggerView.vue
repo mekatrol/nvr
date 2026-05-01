@@ -8,11 +8,30 @@
             <select v-model="selectedCameraId" @change="refreshCamera">
               <option v-if="isLoadingCameras" value="">Loading cameras</option>
               <option v-else-if="cameras.length === 0" value="">No cameras loaded</option>
+              <option :value="debugFileCameraId">Select MP4 file</option>
               <option v-for="camera in cameras" :key="camera.id" :value="camera.id">
                 {{ camera.name }}
               </option>
             </select>
           </label>
+          <input
+            ref="debugFileInput"
+            class="file-input"
+            type="file"
+            accept="video/mp4,.mp4"
+            @change="handleDebugFileSelection"
+          />
+          <button
+            v-if="isDebugFileCameraSelected"
+            class="refresh-button file-button"
+            :disabled="isActionBusy || isRunLoopActive"
+            @click="openDebugFilePicker"
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">
+              {{ materialIcons.file }}
+            </span>
+            <span>{{ selectedDebugSourceName || 'Browse MP4' }}</span>
+          </button>
           <label class="ribbon-field">
             <span>Pipeline</span>
             <select
@@ -120,8 +139,13 @@
 
       <header class="statusbar">
         <span>{{ selectedDebugPipeline?.name || selectedDebugPipeline?.id || 'No pipeline selected' }}</span>
-        <span>{{ selectedCamera?.enabled ? 'Recorder enabled' : 'Recorder disabled' }}</span>
-        <span>{{ selectedCamera?.pipeline_enabled ? 'Pipeline enabled' : 'Pipeline disabled' }}</span>
+        <span v-if="isDebugFileCameraSelected">
+          {{ selectedDebugSourceName ? `MP4: ${selectedDebugSourceName}` : 'No MP4 selected' }}
+        </span>
+        <template v-else>
+          <span>{{ selectedCamera?.enabled ? 'Recorder enabled' : 'Recorder disabled' }}</span>
+          <span>{{ selectedCamera?.pipeline_enabled ? 'Pipeline enabled' : 'Pipeline disabled' }}</span>
+        </template>
         <span v-if="hasPipelineIntegrityProblem">Debugging blocked: pipeline integrity problem</span>
         <span v-else>Status: {{ debugState.status }}</span>
         <span>Step {{ debugState.cursor ?? 0 }} / {{ debugState.total_steps ?? 0 }}</span>
@@ -148,10 +172,12 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import StagePreview from './StagePreview.vue'
 import { useNvrAppState } from '@/composables/useNvrAppState'
 
 const {
+  debugFileCameraId,
   cameras,
   selectedCameraId,
   pipelines,
@@ -165,6 +191,8 @@ const {
   selectedStageId,
   materialIcons,
   selectedCamera,
+  isDebugFileCameraSelected,
+  selectedDebugSourceName,
   selectedDebugPipeline,
   selectedDebugPipelineStages,
   hasPipelineIntegrityProblem,
@@ -181,10 +209,26 @@ const {
   startRunLoop,
   toggleBreakpoint,
   refreshCamera,
+  uploadDebugSourceFile,
   withAction,
   selectDebugPipeline,
   selectDebugStage,
 } = useNvrAppState()
+
+const debugFileInput = ref<HTMLInputElement | null>(null)
+
+const openDebugFilePicker = (): void => {
+  debugFileInput.value?.click()
+}
+
+const handleDebugFileSelection = (event: Event): void => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  uploadDebugSourceFile(file).finally(() => {
+    input.value = ''
+  })
+}
 </script>
 
 <style scoped>
@@ -276,6 +320,20 @@ const {
   background: #ffffff;
   color: #1f2933;
   cursor: pointer;
+}
+
+.file-input {
+  display: none;
+}
+
+.file-button {
+  max-width: 280px;
+}
+
+.file-button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .statusbar {

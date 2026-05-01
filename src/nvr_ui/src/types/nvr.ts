@@ -5,6 +5,12 @@ export type Camera = {
   pipeline_enabled: boolean
 }
 
+export type DebugSourceFile = {
+  id: string
+  name: string
+  frame_interval_seconds: number | null
+}
+
 export type Stage = {
   id: string
   enabled: boolean

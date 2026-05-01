@@ -21,6 +21,13 @@ export const postJson = async <T>(path: string, body: Record<string, unknown>): 
   })
 }
 
+export const postForm = async <T>(path: string, body: FormData): Promise<T> => {
+  return requestJson<T>(path, {
+    method: 'POST',
+    body,
+  })
+}
+
 const requestJson = async <T>(path: string, init: RequestInit): Promise<T> => {
   let response: Response
   try {
