@@ -98,7 +98,7 @@ class DebugApiTest(unittest.TestCase):
             self.assertEqual([], debug_state["records"])
             self.assertIn("Dropping bad pipeline frame", logger.warnings[0])
 
-    def test_ffmpeg_rtsp_frame_source_builds_keyframe_gpu_decode_command(self):
+    def test_ffmpeg_rtsp_frame_source_builds_gpu_decode_command(self):
         frame_source = FfmpegRtspFrameSource(
             "rtsp://camera/stream",
             ffmpeg_binary="/usr/bin/ffmpeg",
@@ -109,8 +109,8 @@ class DebugApiTest(unittest.TestCase):
 
         self.assertIn("-hwaccel", command)
         self.assertIn("auto", command)
-        self.assertIn("-skip_frame", command)
-        self.assertIn("nokey", command)
+        self.assertIn("-vf", command)
+        self.assertIn("fps=1", command)
         self.assertIn("-vcodec", command)
         self.assertIn("mjpeg", command)
 

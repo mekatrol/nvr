@@ -86,8 +86,6 @@ class FfmpegRtspFrameSource:
             command.extend(["-hwaccel", self.hardware_acceleration])
         command.extend(
             [
-                "-skip_frame",
-                "nokey",
                 "-i",
                 self.source,
                 "-an",
@@ -95,6 +93,8 @@ class FfmpegRtspFrameSource:
                 "-dn",
                 "-map",
                 "0:v:0",
+                "-vf",
+                "fps=1",
                 "-f",
                 "image2pipe",
                 "-vcodec",
