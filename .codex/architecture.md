@@ -1,54 +1,55 @@
 # NVR Pipeline Graph Architecture
 
-## Purpose
+## Goal
 
-The image processing system should be built around named pipelines that can be connected together into a graph. Each named pipeline owns a focused set of processing stages, and its output can feed one or more downstream pipelines.
+- Build image processing as a DAG of named pipelines.
+- Let pipeline output feed one or many downstream pipelines.
+- Reuse groups: preprocessing, detection, thumbnail, post-processing, events, debug.
+- Avoid duplicated stage config.
 
-This allows reusable function groups such as preprocessing, object detection, thumbnail creation, post processing, event generation, and debug visualization to be combined per camera without duplicating stage definitions.
+## Layout
 
-## Repository Layout Direction
+- Use `src` layout.
+- Keep root entry thin.
+- Keep backend and SPA separate.
 
-Before implementing the pipeline graph, restructure the codebase into a `src` layout that separates background processes, shared Python code, the Python web/API backend, and the Vue debugger SPA.
+Packages:
 
-The target separation is:
+- `src/nvr_background`: service startup, recorder lifecycle, retention, frame acquisition, graph runner.
+- `src/nvr_common`: config, logging, RTSP sanitizing, shared models, graph primitives.
+- `src/nvr_web`: debug API, debug sessions, image preview, web server.
+- `src/nvr_ui`: Vue 3 TypeScript Vite debugger SPA. Not Python.
 
-- background process package: service startup, recorder lifecycle, retention management, frame acquisition, and graph runner lifecycle
-- common package: configuration, logging, RTSP sanitizing, shared models, and pipeline graph primitives that are used by both background and web/API code
-- Python web/API package: future debug API, debug session endpoints, image preview endpoints, and web server integration
-- Vue SPA subproject: browser UI for the pipeline debugger, built with Vue 3, TypeScript, and Vite
+Ownership:
 
-The chosen layout is:
+- Backend owns HTTP/WebSocket APIs and static serving.
+- SPA owns browser routes, debugger screens, client state, API calls.
 
-- `src/nvr_background`: Python background service package for service startup, recorder lifecycle, retention management, frame acquisition, and graph runner lifecycle.
-- `src/nvr_common`: Python shared package for configuration, logging, RTSP sanitizing, shared models, and pipeline graph primitives used by both background and web/API code.
-- `src/nvr_web`: Python web/API backend package for future debugger endpoints and web server integration.
-- `src/nvr_ui`: Vue 3 TypeScript Vite SPA subproject for the debugger UI. This directory is not a Python package and should be treated as a Node/Vite project with its own `package.json`, lockfile, scripts, and ignore rules.
+## Graph
 
-Keep the root entry point thin after the move. It should only delegate to the background service entry point or be replaced by a documented module entry point.
+- Directed acyclic graph.
+- Validate cycles before runtime.
+- Consider feedback loops later only with explicit buffering, scheduling, termination.
 
-The Python backend and Vue SPA should remain separate codebases even though they both live under `src`. The backend owns HTTP/WebSocket APIs and any static-file serving integration. The SPA owns browser routes, debugger screens, client-side state, and API calls to `nvr_web`.
+Graph has:
 
-## Core Model
-
-### Pipeline Graph
-
-A pipeline graph is a directed acyclic graph of named pipelines.
-
-Each graph has:
-
-- one or more input pipelines that receive camera frames or extracted images
+- input pipelines for camera frames or extracted images
 - named pipeline nodes
-- directed connections between pipeline nodes
-- optional fan-out, where one pipeline output feeds multiple downstream pipelines
-- optional fan-in, where one pipeline receives inputs from multiple upstream pipelines
+- directed edges
+- fan-out
+- fan-in
 
-Cycles should be rejected during configuration validation. Feedback loops can be considered later, but they require explicit buffering, scheduling, and termination rules.
+## Pipeline
 
-### Named Pipeline
+- Ordered chain of stages.
+- Stable `id`.
+- `enabled`.
+- Zero or more stages.
+- One or more inputs.
+- One output.
+- May feed multiple downstream pipelines.
 
-A named pipeline is an ordered chain of stages with a clear functional purpose.
-
-Examples:
+Example ids:
 
 - `preprocessing`
 - `object_detection`
@@ -57,63 +58,43 @@ Examples:
 - `approach_detection`
 - `mqtt_events`
 
-Each pipeline:
+## Stage
 
-- has a stable id
-- can be enabled or disabled
-- contains zero or more configured stages
-- receives one or more pipeline inputs
-- produces one pipeline output
-- can pass its output to one or more downstream pipelines
+- Python plugin inside one pipeline.
+- Stable `id` inside parent pipeline.
+- `enabled`.
+- Input: all pipeline inputs, original image, current image, metadata.
+- Output: current image, metadata.
+- May add debug artifacts.
+- May emit side effects through injected services, such as MQTT.
+- Disabled stage stays visible but does not run.
 
-### Stage
+## Data
 
-A stage is a pluggable Python processing module inside a named pipeline.
+Original image:
 
-Each stage:
+- Preserve for full graph run.
+- Never replace or mutate in place.
 
-- has a stable id within its parent pipeline
-- can be enabled or disabled
-- receives the pipeline input image set, original image, current image, and metadata
-- returns an updated current image and metadata
-- may add debug artifacts
-- may emit controlled side effects through services such as MQTT
-
-Disabled stages remain visible in configuration and debugging, but execution skips them.
-
-## Data Model
-
-### Original Image
-
-The original image is preserved for the full graph execution. Every pipeline and every stage can access it. Stages must not replace or mutate the original image in place.
-
-### Pipeline Input
-
-A pipeline input includes:
+Pipeline input:
 
 - original image
-- current image for that input branch
-- metadata dictionary for that branch
-- source pipeline id, when produced by another pipeline
-- camera id and frame timestamp
+- current branch image
+- branch metadata
+- source pipeline id
+- camera id
+- frame id or timestamp
 
-For source pipelines, the current image starts as the original image.
-
-### Pipeline Output
-
-A pipeline output includes:
+Pipeline output:
 
 - pipeline id
 - output image
-- metadata dictionary
-- optional debug artifacts
-- timing and status information
+- metadata
+- debug artifacts
+- timing
+- status
 
-Downstream pipelines receive upstream pipeline outputs as their inputs.
-
-### Fan-Out
-
-Fan-out means a single pipeline output is passed to multiple downstream pipelines.
+## Fan-Out
 
 Example:
 
@@ -123,11 +104,13 @@ preprocessing
   -> thumbnail
 ```
 
-The downstream pipelines should receive independent input objects so that one branch cannot accidentally mutate another branch's metadata or image reference. Image arrays may share memory internally only when the implementation can guarantee stages will not mutate shared data unexpectedly.
+Rules:
 
-### Fan-In
+- Give each branch independent input objects.
+- Keep branch metadata isolated.
+- Share image memory only when mutation safety is guaranteed.
 
-Fan-in means a pipeline receives outputs from two or more upstream pipelines and processes them as a set.
+## Fan-In
 
 Example:
 
@@ -136,15 +119,13 @@ preprocessing -> object_detection -> post_processing
 preprocessing -> thumbnail        -> post_processing
 ```
 
-The fan-in pipeline receives both `object_detection` and `thumbnail` outputs. Its stages can inspect each upstream image and metadata set, then produce a single combined output.
+Rules:
 
-Fan-in requires scheduling rules:
+- Run when all required upstream inputs for same source frame exist.
+- Correlate by camera id and frame id or timestamp.
+- Missing or failed input behavior must be configured: skip, wait with timeout, or run partial.
 
-- A fan-in pipeline should run when all required upstream inputs for the same source frame are available.
-- Inputs should be correlated by camera id and frame id or timestamp.
-- Missing or failed upstream inputs should follow configured behavior: skip, wait until timeout, or run with partial inputs.
-
-## Example Graph
+## Example
 
 ```text
 camera_frame
@@ -157,7 +138,7 @@ camera_frame
             -> debug_preview
 ```
 
-Alternative with fan-in:
+Fan-in variant:
 
 ```text
 camera_frame
@@ -168,11 +149,11 @@ camera_frame
             -> post_processing
 ```
 
-In the second example, `post_processing` runs after both `object_detection` and `thumbnail` outputs are available for the same frame.
+`post_processing` waits for both upstream outputs for the same frame.
 
-## Configuration Direction
+## Config Shape
 
-Expected YAML shape, subject to refinement:
+Expected YAML, refine as needed:
 
 ```yaml
 pipeline_graph:
@@ -249,31 +230,29 @@ pipeline_graph:
       to: mqtt_events
 ```
 
-## Debugging Model
+## Debugger
 
-The debugger should expose both graph-level and stage-level state.
+Graph view:
 
-Graph-level debugging:
+- show pipelines and edges
+- show pending, running, complete, skipped, failed
+- breakpoints on pipeline ids
+- show fan-out branches
+- show fan-in waits
 
-- show named pipelines and edges
-- show pending, running, completed, skipped, and failed pipeline nodes
-- allow breakpoints on pipeline ids
-- show fan-out branches and fan-in waits
+Stage view:
 
-Stage-level debugging:
+- show selected pipeline stages
+- breakpoints on stage ids
+- step through stage
+- step over pipeline
+- show input image, output image, metadata before, metadata after
+- for fan-in, show upstream input set together
 
-- show stages inside the selected pipeline
-- allow breakpoints on stage ids
-- support step through a stage
-- support step over one whole pipeline
-- display input image, output image, metadata before, and metadata after
+## Implementation
 
-For fan-in pipelines, the UI should display the set of upstream inputs together.
-
-## Implementation Notes
-
-- Start with a directed acyclic graph executor.
-- Validate unknown pipeline ids, duplicate ids, disabled references, and cycles before runtime.
-- Keep branch metadata isolated unless a stage explicitly combines metadata.
-- Treat side-effect stages as normal stages, but inject services such as MQTT rather than letting stages create uncontrolled global clients.
-- Preserve compatibility with a simple linear pipeline by representing it as a graph where each pipeline has one downstream pipeline.
+- Start with DAG executor.
+- Validate unknown ids, duplicate ids, disabled refs, cycles.
+- Keep branch metadata isolated unless stage combines it.
+- Inject side-effect services. Do not let stages create globals.
+- Represent simple linear pipeline as graph with one downstream edge per pipeline.

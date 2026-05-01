@@ -1,60 +1,58 @@
 # Codex Environment
 
-This Codex workspace has been initialized for the NVR repository.
+## Repo
 
-## Repository Shape
+- Python 3.12.
+- Vue 3 + TypeScript + Vite SPA: `src/nvr_ui`.
+- Python deps: `requirements.txt`.
+- Frontend deps: `src/nvr_ui/package.json`.
+- Tool config: `pyproject.toml`.
+- Venv: `.venv`.
+- Run app: `.venv/bin/python nvr.py`.
+- Run background module: `PYTHONPATH=src .venv/bin/python -m nvr_background`.
+- Needs `ffmpeg`.
 
-- Language: Python 3.12
-- Frontend: Vue 3 TypeScript Vite SPA in `src/nvr_ui`
-- Dependency file: `requirements.txt`
-- Frontend dependency file: `src/nvr_ui/package.json`
-- Tool configuration: `pyproject.toml`
-- Existing virtual environment: `.venv`
-- Main command: `.venv/bin/python nvr.py`
-- Background module command: `PYTHONPATH=src .venv/bin/python -m nvr_background`
-- Main external dependency: `ffmpeg`
+## Config
 
-## Project Configuration
+- Read `pyproject.toml` before Python tooling changes.
+- Keep Ruff config and validation commands aligned.
 
-Check `pyproject.toml` before making Python formatting, linting, or tooling changes. It is the source of project-specific Ruff configuration and should be kept in sync with validation commands.
+## Prompt Style
 
-## Project-Specific Coding Standards
+- Use caveman prompts.
+- Short. Direct. Low-token.
+- Prefer imperatives.
+- Cut filler.
+- Examples: `Fix tests`, `Add camera status API`, `Explain retention bug`, `Refactor config merge`.
+- Expand only for precision, safety, or ambiguity.
 
-### Python
+## Python
 
-- Read and follow the rules defined in `pyproject.toml` before making Python changes.
-- Use Ruff as the Python formatter and linter for this repository.
-- Preserve formatter behavior that avoids magic trailing commas / dangling commas.
-- Keep one top-level class per file, including dataclasses.
-- Do not introduce new Python files that contain multiple classes.
-- Unused Python imports are not allowed.
+- Follow `pyproject.toml`.
+- Use Ruff formatter and linter.
+- Preserve no-magic-trailing-comma behavior.
+- One top-level class per file, including dataclasses.
+- No new multi-class Python files.
+- No unused imports.
 
-### Design
+## Design
 
-- Avoid gradient colors in icons, graphics, and UI styling unless explicitly requested.
-- Do not use spin controls for floating-point entry in the UI; use validated text inputs instead.
+- No gradients in icons, graphics, UI unless asked.
+- No spin controls for float input. Use validated text input.
 
-## Safe Default Checks
+## Checks
 
-Run these before handing back Python changes:
+Run before handoff after Python changes:
 
 ```bash
 .venv/bin/python -m compileall nvr.py src
 .venv/bin/ruff check .
 ```
 
-## Runtime Notes
+## Runtime
 
-The app expects RTSP credentials in environment variables and camera definitions in YAML:
-
-```bash
-RTSP_USER
-RTSP_PASSWORD
-NVR_CONFIG
-```
-
-`NVR_CONFIG` is optional and defaults to `config.yaml`.
-
-Avoid running the service as a routine check because it launches `ffmpeg` subprocesses for configured cameras.
-
-The Vue SPA is a separate Node/Vite subproject under `src/nvr_ui`. Its generated directories such as `node_modules`, `dist`, `dist-ssr`, coverage output, and TypeScript build info should remain ignored.
+- Env vars: `RTSP_USER`, `RTSP_PASSWORD`, optional `NVR_CONFIG`.
+- Default config: `config.yaml`.
+- Do not run service for routine checks. It starts `ffmpeg` and touches camera paths.
+- Vue SPA lives under `src/nvr_ui`.
+- Keep generated frontend output ignored: `node_modules`, `dist`, `dist-ssr`, coverage, TS build info.
