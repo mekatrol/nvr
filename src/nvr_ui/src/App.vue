@@ -241,7 +241,6 @@ const canDraftMask = computed(
     maskFrameWidth.value > 0 &&
     maskFrameHeight.value > 0,
 )
-const canEditMask = computed(() => canDraftMask.value && canApplyStage.value)
 const hasMaskDraftArea = computed(() => polygonArea(maskDraftPolygon.value) > 0)
 const maskPolygons = computed(() => readMaskPolygons())
 const canSetBreakpoint = computed(
@@ -253,7 +252,7 @@ const canSetBreakpoint = computed(
     !isActionBusy.value,
 )
 
-async function loadCameras() {
+const loadCameras = async (): Promise<void> => {
   isLoadingCameras.value = true
   try {
     const payload = await getJson<{ cameras: Camera[] }>('/api/cameras')
@@ -267,7 +266,7 @@ async function loadCameras() {
   }
 }
 
-async function loadPipelines() {
+const loadPipelines = async (): Promise<void> => {
   if (!selectedCameraId.value) return
   const pathQuery = pipelineConfigPathQuery()
   const graph = await getJson<{
@@ -277,12 +276,12 @@ async function loadPipelines() {
   applyPipelineGraph(graph)
 }
 
-function applyPipelineGraph(graph: { pipelines: Pipeline[]; integrity?: PipelineIntegrity }) {
+const applyPipelineGraph = (graph: { pipelines: Pipeline[]; integrity?: PipelineIntegrity }): void => {
   pipelines.value = graph.pipelines
   pipelineIntegrity.value = graph.integrity ?? { ok: true, issues: [] }
 }
 
-async function loadPipelineConfigPipelines() {
+const loadPipelineConfigPipelines = async (): Promise<void> => {
   const graph = await getJson<PipelinesResponse>('/api/pipeline_config/pipelines')
   pipelineConfigEnabled.value = graph.enabled
   pipelineConfigFrameIntervalSeconds.value = String(
@@ -298,7 +297,7 @@ async function loadPipelineConfigPipelines() {
   }
 }
 
-async function reloadPipelines() {
+const reloadPipelines = async (): Promise<void> => {
   await stopRunLoop(false)
   await postJson<{ pipelines: Pipeline[]; integrity?: PipelineIntegrity }>(
     '/api/pipelines/reload',
@@ -310,7 +309,7 @@ async function reloadPipelines() {
   deployStatus.value = 'Pipelines reloaded'
 }
 
-async function loadDebugState() {
+const loadDebugState = async (): Promise<void> => {
   if (!selectedCameraId.value) return
   const pathQuery = pipelineConfigPathQuery()
   debugState.value = await getJson<DebugState>(
@@ -322,7 +321,7 @@ async function loadDebugState() {
   metadata.value = payload.metadata
 }
 
-async function loadLogs() {
+const loadLogs = async (): Promise<void> => {
   isLoadingLogs.value = true
   try {
     const payload = await getJson<{ entries: LogEntry[] }>('/api/logs?limit=500')
@@ -332,12 +331,12 @@ async function loadLogs() {
   }
 }
 
-async function clearLogs() {
+const clearLogs = async (): Promise<void> => {
   const payload = await postJson<{ entries: LogEntry[] }>('/api/logs/clear', {})
   logEntries.value = payload.entries
 }
 
-async function runCommand(command: string) {
+const runCommand = async (command: string): Promise<void> => {
   if (!selectedCameraId.value) return
   debugState.value = await postJson<DebugState>('/api/debug/command', {
     camera_id: selectedCameraId.value,
@@ -347,17 +346,17 @@ async function runCommand(command: string) {
   await loadDebugState()
 }
 
-async function runDebuggerCommand(command: string) {
+const runDebuggerCommand = async (command: string): Promise<void> => {
   if (isActionBusy.value) return
   await withAction(command, () => runCommand(command))
 }
 
-async function stopDebuggerRun() {
+const stopDebuggerRun = async (): Promise<void> => {
   if (!canStop.value) return
   await withAction('stop', () => stopRunLoop())
 }
 
-async function startRunLoop() {
+const startRunLoop = async (): Promise<void> => {
   if (isRunLoopActive.value || isActionBusy.value) return
   isRunLoopActive.value = true
   try {
@@ -372,7 +371,7 @@ async function startRunLoop() {
   }, defaultPipelineFrameIntervalSeconds * 1000)
 }
 
-async function runLoopTick() {
+const runLoopTick = async (): Promise<void> => {
   if (isRunLoopTicking.value) return
   if (!selectedCameraId.value) {
     stopRunLoop(false)
@@ -389,7 +388,7 @@ async function runLoopTick() {
   }
 }
 
-async function stopRunLoop(sendPause = true) {
+const stopRunLoop = async (sendPause: boolean = true): Promise<void> => {
   isRunLoopActive.value = false
   if (runLoopTimer.value) {
     clearInterval(runLoopTimer.value)
@@ -400,7 +399,7 @@ async function stopRunLoop(sendPause = true) {
   }
 }
 
-async function toggleBreakpoint(enabled: boolean) {
+const toggleBreakpoint = async (enabled: boolean): Promise<void> => {
   if (isActionBusy.value || !selectedCameraId.value || !selectedBreakpoint.value) return
   currentAction.value = enabled ? 'set_breakpoint' : 'clear_breakpoint'
   try {
@@ -417,7 +416,7 @@ async function toggleBreakpoint(enabled: boolean) {
   }
 }
 
-async function refreshCamera() {
+const refreshCamera = async (): Promise<void> => {
   await stopRunLoop(false)
   try {
     selectedPipelineConfigPath.value = ''
@@ -430,7 +429,7 @@ async function refreshCamera() {
   }
 }
 
-async function savePipelineConfigPipelines() {
+const savePipelineConfigPipelines = async (): Promise<PipelinesResponse | undefined> => {
   deployStatus.value = ''
   const validationError = validatePipelinesPipelineReferences()
   if (validationError) {
@@ -448,7 +447,7 @@ async function savePipelineConfigPipelines() {
   return saved
 }
 
-async function withAction<T>(action: string, task: () => Promise<T>): Promise<T | undefined> {
+const withAction = async <T,>(action: string, task: () => Promise<T>): Promise<T | undefined> => {
   if (isActionBusy.value) return undefined
   currentAction.value = action
   try {
@@ -458,7 +457,7 @@ async function withAction<T>(action: string, task: () => Promise<T>): Promise<T 
   }
 }
 
-async function deployPipelineConfigPipelines() {
+const deployPipelineConfigPipelines = async (): Promise<void> => {
   await savePipelineConfigPipelines()
   const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
@@ -467,7 +466,7 @@ async function deployPipelineConfigPipelines() {
   deployStatus.value = 'Pipelines deployed and server config reloaded'
 }
 
-async function generateExampleResizePipeline() {
+const generateExampleResizePipeline = async (): Promise<void> => {
   const generated = await postJson<PipelinesResponse>('/api/pipelines/examples/resize', {})
   pipelineConfigEnabled.value = generated.enabled
   pipelineConfigFrameIntervalSeconds.value = String(
@@ -480,14 +479,14 @@ async function generateExampleResizePipeline() {
     'Example resize pipeline generated. Use Debugger to run it, or deploy pipelines when ready.'
 }
 
-async function deployPipelinesFromEditor() {
+const deployPipelinesFromEditor = async (): Promise<void> => {
   const deployed = await postJson<PipelinesResponse>('/api/pipeline_config/pipelines/deploy', {})
   pipelines.value = deployed.pipelines
   pipelineFileTree.value = deployed.pipeline_file_tree ?? pipelineFileTree.value
   deployStatus.value = 'Pipelines deployed and server config reloaded'
 }
 
-async function getJson<T>(path: string): Promise<T> {
+const getJson = async <T,>(path: string): Promise<T> => {
   apiError.value = ''
   let response: Response
   try {
@@ -503,7 +502,7 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
-async function postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
+const postJson = async <T,>(path: string, body: Record<string, unknown>): Promise<T> => {
   apiError.value = ''
   let response: Response
   try {
@@ -523,7 +522,7 @@ async function postJson<T>(path: string, body: Record<string, unknown>): Promise
   return response.json() as Promise<T>
 }
 
-async function responseErrorMessage(response: Response) {
+const responseErrorMessage = async (response: Response): Promise<string> => {
   try {
     const payload = (await response.clone().json()) as { error?: unknown }
     if (typeof payload.error === 'string' && payload.error.length > 0) {
@@ -535,11 +534,11 @@ async function responseErrorMessage(response: Response) {
   return `${response.status} ${response.statusText}`
 }
 
-function formatJson(value: unknown) {
+const formatJson = (value: unknown): string => {
   return JSON.stringify(value ?? {}, null, 2)
 }
 
-function addPipeline() {
+const addPipeline = (): void => {
   const baseId = uniqueId(
     'pipeline',
     pipelineConfigPipelines.value.map((pipeline) => pipeline.id),
@@ -553,16 +552,16 @@ function addPipeline() {
   selectPipeline(baseId)
 }
 
-function addPipelineFromTree() {
+const addPipelineFromTree = (): void => {
   addPipeline()
   currentView.value = 'debug'
 }
 
-function deleteSelectedPipeline() {
+const deleteSelectedPipeline = (): void => {
   deletePipeline(selectedPipelineId.value)
 }
 
-function deletePipeline(pipelineId: string) {
+const deletePipeline = (pipelineId: string): void => {
   if (!pipelineId) return
   pipelineConfigPipelines.value = pipelineConfigPipelines.value.filter(
     (pipeline) => pipeline.id !== pipelineId,
@@ -575,7 +574,7 @@ function deletePipeline(pipelineId: string) {
   refreshSelectedEditors()
 }
 
-function addStage() {
+const addStage = (): void => {
   if (!selectedPipelinesPipeline.value) return
   const baseId = uniqueId(
     'stage',
@@ -591,17 +590,17 @@ function addStage() {
   selectStage(baseId)
 }
 
-function addStageToPipeline(pipelineId: string) {
+const addStageToPipeline = (pipelineId: string): void => {
   selectPipeline(pipelineId)
   addStage()
   currentView.value = 'debug'
 }
 
-function deleteSelectedStage() {
+const deleteSelectedStage = (): void => {
   deleteStage(selectedPipelineId.value, selectedStageId.value)
 }
 
-function deleteStage(pipelineId: string, stageId: string) {
+const deleteStage = (pipelineId: string, stageId: string): void => {
   const pipeline = pipelineConfigPipelines.value.find((candidate) => candidate.id === pipelineId)
   if (!pipeline || !stageId) return
   pipeline.stages = pipeline.stages.filter((stage) => stage.id !== stageId)
@@ -611,24 +610,24 @@ function deleteStage(pipelineId: string, stageId: string) {
   refreshSelectedEditors()
 }
 
-function selectPipeline(pipelineId: string) {
+const selectPipeline = (pipelineId: string): void => {
   selectedPipelineId.value = pipelineId
   selectedStageId.value = selectedPipelinesPipeline.value?.stages[0]?.id ?? ''
   refreshSelectedEditors()
 }
 
-function selectStage(stageId: string) {
+const selectStage = (stageId: string): void => {
   selectedStageId.value = stageId
   refreshSelectedEditors()
 }
 
-function selectStageInPipeline(pipelineId: string, stageId: string) {
+const selectStageInPipeline = (pipelineId: string, stageId: string): void => {
   selectedPipelineId.value = pipelineId
   selectedStageId.value = stageId
   refreshSelectedEditors()
 }
 
-function applyPipelineEdits() {
+const applyPipelineEdits = (): void => {
   const pipeline = selectedPipelinesPipeline.value
   if (!pipeline) return
   const nextId = selectedPipelineIdEdit.value.trim()
@@ -639,7 +638,7 @@ function applyPipelineEdits() {
   selectedPipelineId.value = nextId
 }
 
-async function applyStageEdits() {
+const applyStageEdits = async (): Promise<void> => {
   if (isActionBusy.value) return
   const stage = selectedPipelinesStage.value
   if (!stage) return
@@ -676,7 +675,7 @@ async function applyStageEdits() {
   }
 }
 
-function refreshSelectedEditors() {
+const refreshSelectedEditors = (): void => {
   const pipeline = selectedPipelinesPipeline.value
   selectedPipelineIdEdit.value = pipeline?.id ?? ''
   selectedPipelineNameEdit.value = pipeline?.name ?? ''
@@ -690,7 +689,7 @@ function refreshSelectedEditors() {
   maskDraftPolygon.value = []
 }
 
-function toPipelinesPayload() {
+const toPipelinesPayload = (): { enabled: boolean; frame_interval_seconds: number | string; pipelines: Array<{ id: string; name: string; enabled: boolean; stages: Array<{ id: string; enabled: boolean; pipeline?: string; filename?: string; module?: string; class?: string; config: Record<string, unknown> }> }> } => {
   const interval = Number(pipelineConfigFrameIntervalSeconds.value)
   return {
     enabled: pipelineConfigEnabled.value,
@@ -714,13 +713,13 @@ function toPipelinesPayload() {
   }
 }
 
-function stageSummary(stage: Stage) {
+const stageSummary = (stage: Stage): string => {
   if (stage.pipeline) return `pipeline: ${stage.pipeline}`
   if (stage.filename) return stage.filename
   return stage.class_name || stage.module || 'stage'
 }
 
-function openPipelineDebug(pipelineId: string) {
+const openPipelineDebug = (pipelineId: string): void => {
   if (hasPipelineIntegrityProblem.value) return
   debugPipelineId.value = pipelineId
   selectedPipelineId.value = pipelineId
@@ -728,7 +727,7 @@ function openPipelineDebug(pipelineId: string) {
   refreshSelectedEditors()
 }
 
-function openStageDebug(pipelineId: string, stageId: string) {
+const openStageDebug = (pipelineId: string, stageId: string): void => {
   if (hasPipelineIntegrityProblem.value) return
   debugPipelineId.value = pipelineId
   selectedPipelineId.value = pipelineId
@@ -737,12 +736,12 @@ function openStageDebug(pipelineId: string, stageId: string) {
   refreshSelectedEditors()
 }
 
-function showPipelineIndex() {
+const showPipelineIndex = (): void => {
   currentView.value = 'index'
   debugPipelineId.value = ''
 }
 
-async function openPipelineConfigFile(path: string) {
+const openPipelineConfigFile = async (path: string): Promise<void> => {
   if (!isYamlPath(path)) return
   await stopRunLoop(false)
   selectedPipelineConfigPath.value = path === 'pipelines.yaml' ? '' : path
@@ -751,16 +750,16 @@ async function openPipelineConfigFile(path: string) {
   await loadDebugState()
 }
 
-function pipelineConfigPathQuery() {
+const pipelineConfigPathQuery = (): string => {
   if (!selectedPipelineConfigPath.value) return ''
   return `&pipeline_config_path=${encodeURIComponent(selectedPipelineConfigPath.value)}`
 }
 
-function isYamlPath(path: string) {
+const isYamlPath = (path: string): boolean => {
   return /\.(ya?ml)$/i.test(path)
 }
 
-function handleMaskPreviewClick(event: MouseEvent) {
+const handleMaskPreviewClick = (event: MouseEvent): void => {
   if (ignoreNextMaskClick.value) {
     ignoreNextMaskClick.value = false
     return
@@ -768,13 +767,13 @@ function handleMaskPreviewClick(event: MouseEvent) {
   addMaskPreviewPoint(event)
 }
 
-function handleMaskPreviewDoubleClick(event: MouseEvent) {
+const handleMaskPreviewDoubleClick = (event: MouseEvent): void => {
   ignoreNextMaskClick.value = true
   addMaskPreviewPoint(event)
   commitMaskDraftPolygon()
 }
 
-function addMaskPreviewPoint(event: MouseEvent) {
+const addMaskPreviewPoint = (event: MouseEvent): void => {
   if (!canDraftMask.value) return
   const image = maskPreviewImage.value
   if (!image) return
@@ -787,29 +786,29 @@ function addMaskPreviewPoint(event: MouseEvent) {
   })
 }
 
-function togglePreviewExpansion(preview: 'input' | 'output') {
+const togglePreviewExpansion = (preview: 'input' | 'output'): void => {
   expandedPreview.value = expandedPreview.value === preview ? null : preview
 }
 
-function closeMaskPolygon() {
+const closeMaskPolygon = (): void => {
   if (!hasMaskDraftArea.value) return
   commitMaskDraftPolygon()
 }
 
-function undoMaskPoint() {
+const undoMaskPoint = (): void => {
   maskDraftPolygon.value = maskDraftPolygon.value.slice(0, -1)
 }
 
-function clearMaskDraft() {
+const clearMaskDraft = (): void => {
   maskDraftPolygon.value = []
 }
 
-function clearMaskPolygons() {
+const clearMaskPolygons = (): void => {
   updateMaskConfig([])
   maskDraftPolygon.value = []
 }
 
-function updateMaskConfig(polygons: MaskPoint[][]) {
+const updateMaskConfig = (polygons: MaskPoint[][]): void => {
   const config = readMaskConfig()
   config.polygons = polygons
   selectedStageConfigJson.value = formatJson(config)
@@ -819,17 +818,17 @@ function updateMaskConfig(polygons: MaskPoint[][]) {
   }
 }
 
-function commitMaskDraftPolygon() {
+const commitMaskDraftPolygon = (): void => {
   if (!hasMaskDraftArea.value) return
   updateMaskConfig([...maskPolygons.value, [...maskDraftPolygon.value]])
   maskDraftPolygon.value = []
 }
 
-function readMaskPolygons() {
+const readMaskPolygons = (): MaskPoint[][] => {
   return readMaskConfig().polygons ?? []
 }
 
-function readMaskConfig(): MaskConfig {
+const readMaskConfig = (): MaskConfig => {
   try {
     const parsed = JSON.parse(selectedStageConfigJson.value || '{}') as MaskConfig
     const polygons = Array.isArray(parsed.polygons) ? parsed.polygons : []
@@ -844,14 +843,14 @@ function readMaskConfig(): MaskConfig {
   }
 }
 
-function normalizeMaskPolygon(value: unknown) {
+const normalizeMaskPolygon = (value: unknown): MaskPoint[] => {
   if (!Array.isArray(value)) return []
   return value
     .map((point) => normalizeMaskPoint(point))
     .filter((point): point is MaskPoint => point !== null)
 }
 
-function normalizeMaskPoint(value: unknown): MaskPoint | null {
+const normalizeMaskPoint = (value: unknown): MaskPoint | null => {
   if (!value || typeof value !== 'object') return null
   const point = value as Record<string, unknown>
   const x = point.x
@@ -860,11 +859,11 @@ function normalizeMaskPoint(value: unknown): MaskPoint | null {
   return { x: Math.round(Number(x)), y: Math.round(Number(y)) }
 }
 
-function maskPolygonPoints(polygon: MaskPoint[]) {
+const maskPolygonPoints = (polygon: MaskPoint[]): string => {
   return polygon.map((point) => `${point.x},${point.y}`).join(' ')
 }
 
-function polygonArea(polygon: MaskPoint[]) {
+const polygonArea = (polygon: MaskPoint[]): number => {
   if (polygon.length < 3) return 0
   let area = 0
   for (let index = 0; index < polygon.length; index += 1) {
@@ -875,11 +874,11 @@ function polygonArea(polygon: MaskPoint[]) {
   return Math.abs(area) / 2
 }
 
-function clamp(value: number, min: number, max: number) {
+const clamp = (value: number, min: number, max: number): number => {
   return Math.min(Math.max(value, min), max)
 }
 
-function startLogRefresh() {
+const startLogRefresh = (): void => {
   if (logRefreshTimer.value) return
   loadLogs().catch(() => undefined)
   logRefreshTimer.value = setInterval(() => {
@@ -887,13 +886,13 @@ function startLogRefresh() {
   }, 3000)
 }
 
-function stopLogRefresh() {
+const stopLogRefresh = (): void => {
   if (!logRefreshTimer.value) return
   clearInterval(logRefreshTimer.value)
   logRefreshTimer.value = null
 }
 
-function validatePipelinesPipelineReferences() {
+const validatePipelinesPipelineReferences = (): string => {
   const pipelineIds = new Set(pipelineConfigPipelines.value.map((pipeline) => pipeline.id))
   const downstream = new Map<string, string[]>()
   for (const pipeline of pipelineConfigPipelines.value) {
@@ -934,7 +933,7 @@ function validatePipelinesPipelineReferences() {
   return ''
 }
 
-function uniqueId(prefix: string, existingIds: string[]) {
+const uniqueId = (prefix: string, existingIds: string[]): string => {
   let index = existingIds.length + 1
   let id = `${prefix}-${index}`
   while (existingIds.includes(id)) {
@@ -986,16 +985,10 @@ onBeforeUnmount(() => {
             <span>pipeline_conf.yaml and Python stage files</span>
           </div>
           <div class="vscode-actions">
-            <button
-              :disabled="!canEditPipelines"
-              @click="withAction('example_resize', generateExampleResizePipeline)"
-            >
+            <button :disabled="!canEditPipelines" @click="withAction('example_resize', generateExampleResizePipeline)">
               Example Resize
             </button>
-            <button
-              :disabled="!canEditPipelines"
-              @click="withAction('deploy_pipelines', deployPipelinesFromEditor)"
-            >
+            <button :disabled="!canEditPipelines" @click="withAction('deploy_pipelines', deployPipelinesFromEditor)">
               Deploy Pipelines
             </button>
             <a :href="vscodeWebUrl" target="_blank" rel="noreferrer">Open</a>
@@ -1004,21 +997,14 @@ onBeforeUnmount(() => {
         <section class="vscode-stage">
           <p v-if="apiError" class="vscode-message error">{{ apiError }}</p>
           <p v-if="deployStatus" class="vscode-message status">{{ deployStatus }}</p>
-          <iframe
-            class="vscode-frame"
-            :src="vscodeWebUrl"
-            title="VS Code Web editor"
-            allow="clipboard-read; clipboard-write"
-            @load="vscodeLoadFailed = false"
-            @error="vscodeLoadFailed = true"
-          ></iframe>
+          <iframe class="vscode-frame" :src="vscodeWebUrl" title="VS Code Web editor"
+            allow="clipboard-read; clipboard-write" @load="vscodeLoadFailed = false"
+            @error="vscodeLoadFailed = true"></iframe>
           <div v-if="vscodeLoadFailed" class="vscode-error">
             <strong>VS Code Web is not available.</strong>
-            <span
-              >Start it with code serve-web --host 127.0.0.1 --port 8000 --without-connection-token
+            <span>Start it with code serve-web --host 127.0.0.1 --port 8000 --without-connection-token
               --accept-server-license-terms --default-folder /home/dad/nvr/pipeline_config, then
-              reload this view.</span
-            >
+              reload this view.</span>
           </div>
         </section>
       </section>
@@ -1053,12 +1039,8 @@ onBeforeUnmount(() => {
               <span role="columnheader">Log description</span>
             </div>
             <div v-if="filteredLogEntries.length === 0" class="log-empty">No log entries</div>
-            <div
-              v-for="(entry, index) in filteredLogEntries"
-              :key="`${entry.timestamp}-${index}`"
-              class="log-row"
-              role="row"
-            >
+            <div v-for="(entry, index) in filteredLogEntries" :key="`${entry.timestamp}-${index}`" class="log-row"
+              role="row">
               <span class="log-time" role="cell">{{ entry.timestamp }}</span>
               <span class="log-level" :class="`level-${entry.level.toLowerCase()}`" role="cell">
                 {{ entry.level }}
@@ -1082,11 +1064,8 @@ onBeforeUnmount(() => {
               </option>
             </select>
           </label>
-          <button
-            class="refresh-button"
-            :disabled="isActionBusy || isRunLoopActive"
-            @click="withAction('refresh_cameras', () => loadCameras().then(refreshCamera))"
-          >
+          <button class="refresh-button" :disabled="isActionBusy || isRunLoopActive"
+            @click="withAction('refresh_cameras', () => loadCameras().then(refreshCamera))">
             Refresh Cameras
           </button>
           <div class="camera-state">
@@ -1105,75 +1084,44 @@ onBeforeUnmount(() => {
           <section class="tree-panel">
             <header>
               <strong>Pipeline Tree</strong>
-              <button
-                title="Add pipeline"
-                :disabled="!canEditPipelines"
-                @click="addPipelineFromTree"
-              >
+              <button title="Add pipeline" :disabled="!canEditPipelines" @click="addPipelineFromTree">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.plus }}
                 </span>
               </button>
             </header>
             <div class="tree">
-              <div
-                v-if="pipelineFileTree.length === 0 && pipelineConfigPipelines.length === 0"
-                class="tree-empty"
-              >
+              <div v-if="pipelineFileTree.length === 0 && pipelineConfigPipelines.length === 0" class="tree-empty">
                 No pipelines
               </div>
-              <PipelineFileTree
-                v-if="pipelineFileTree.length > 0"
-                :nodes="pipelineFileTree"
-                @open-yaml="openPipelineConfigFile"
-              />
-              <div
-                v-for="pipeline in pipelineConfigPipelines"
-                :key="pipeline.id"
-                class="tree-branch"
-              >
-                <div
-                  class="tree-row"
-                  :class="{ selected: pipeline.id === selectedPipelineId && !selectedStageId }"
-                  @click="selectPipeline(pipeline.id)"
-                  @dblclick="openPipelineDebug(pipeline.id)"
-                >
+              <PipelineFileTree v-if="pipelineFileTree.length > 0" :nodes="pipelineFileTree"
+                @open-yaml="openPipelineConfigFile" />
+              <div v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" class="tree-branch">
+                <div class="tree-row" :class="{ selected: pipeline.id === selectedPipelineId && !selectedStageId }"
+                  @click="selectPipeline(pipeline.id)" @dblclick="openPipelineDebug(pipeline.id)">
                   <span class="tree-icon">
                     <span class="material-symbols-outlined" aria-hidden="true">
                       {{ materialIcons.pipeline }}
                     </span>
                   </span>
                   <span class="tree-label">{{ pipeline.name || pipeline.id }}</span>
-                  <button
-                    title="Add stage"
-                    :disabled="!canEditPipelines"
-                    @click.stop="addStageToPipeline(pipeline.id)"
-                  >
+                  <button title="Add stage" :disabled="!canEditPipelines" @click.stop="addStageToPipeline(pipeline.id)">
                     <span class="material-symbols-outlined" aria-hidden="true">
                       {{ materialIcons.plus }}
                     </span>
                   </button>
-                  <button
-                    title="Remove pipeline"
-                    :disabled="!canEditPipelines"
-                    @click.stop="deletePipeline(pipeline.id)"
-                  >
+                  <button title="Remove pipeline" :disabled="!canEditPipelines"
+                    @click.stop="deletePipeline(pipeline.id)">
                     <span class="material-symbols-outlined" aria-hidden="true">
                       {{ materialIcons.trash }}
                     </span>
                   </button>
                 </div>
                 <div class="tree-children">
-                  <div
-                    v-for="stage in pipeline.stages"
-                    :key="stage.id"
-                    class="tree-row stage"
-                    :class="{
-                      selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId,
-                    }"
-                    @click="selectStageInPipeline(pipeline.id, stage.id)"
-                    @dblclick="openStageDebug(pipeline.id, stage.id)"
-                  >
+                  <div v-for="stage in pipeline.stages" :key="stage.id" class="tree-row stage" :class="{
+                    selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId,
+                  }" @click="selectStageInPipeline(pipeline.id, stage.id)"
+                    @dblclick="openStageDebug(pipeline.id, stage.id)">
                     <span class="tree-icon">
                       <span class="material-symbols-outlined" aria-hidden="true">
                         {{
@@ -1186,11 +1134,8 @@ onBeforeUnmount(() => {
                       </span>
                     </span>
                     <span class="tree-label">{{ stage.id }}</span>
-                    <button
-                      title="Remove stage"
-                      :disabled="!canEditPipelines"
-                      @click.stop="deleteStage(pipeline.id, stage.id)"
-                    >
+                    <button title="Remove stage" :disabled="!canEditPipelines"
+                      @click.stop="deleteStage(pipeline.id, stage.id)">
                       <span class="material-symbols-outlined" aria-hidden="true">
                         {{ materialIcons.trash }}
                       </span>
@@ -1226,21 +1171,13 @@ onBeforeUnmount(() => {
                 </span>
                 <span>Step</span>
               </button>
-              <button
-                :disabled="!canStep"
-                title="Step stage"
-                @click="runDebuggerCommand('step_over_stage')"
-              >
+              <button :disabled="!canStep" title="Step stage" @click="runDebuggerCommand('step_over_stage')">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.stepStage }}
                 </span>
                 <span>Step Stage</span>
               </button>
-              <button
-                :disabled="!canStep"
-                title="Step pipeline"
-                @click="runDebuggerCommand('step_over_pipeline')"
-              >
+              <button :disabled="!canStep" title="Step pipeline" @click="runDebuggerCommand('step_over_pipeline')">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.stepPipeline }}
                 </span>
@@ -1254,31 +1191,20 @@ onBeforeUnmount(() => {
                   <option value="">None</option>
                   <template v-for="pipeline in pipelines" :key="pipeline.id">
                     <option :value="`${pipeline.id}:`">{{ pipeline.id }}</option>
-                    <option
-                      v-for="stage in pipeline.stages"
-                      :key="`${pipeline.id}:${stage.id}`"
-                      :value="`${pipeline.id}:${stage.id}`"
-                    >
+                    <option v-for="stage in pipeline.stages" :key="`${pipeline.id}:${stage.id}`"
+                      :value="`${pipeline.id}:${stage.id}`">
                       {{ pipeline.id }} / {{ stage.id }}
                     </option>
                   </template>
                 </select>
               </label>
-              <button
-                :disabled="!canSetBreakpoint"
-                title="Set breakpoint"
-                @click="toggleBreakpoint(true)"
-              >
+              <button :disabled="!canSetBreakpoint" title="Set breakpoint" @click="toggleBreakpoint(true)">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.breakpoint }}
                 </span>
                 <span>Set</span>
               </button>
-              <button
-                :disabled="!canSetBreakpoint"
-                title="Clear breakpoint"
-                @click="toggleBreakpoint(false)"
-              >
+              <button :disabled="!canSetBreakpoint" title="Clear breakpoint" @click="toggleBreakpoint(false)">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.clearBreakpoint }}
                 </span>
@@ -1315,16 +1241,10 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="pipeline-card-actions">
-                <button
-                  :disabled="hasPipelineIntegrityProblem"
-                  @click="openPipelineDebug(pipeline.id)"
-                >
+                <button :disabled="hasPipelineIntegrityProblem" @click="openPipelineDebug(pipeline.id)">
                   View
                 </button>
-                <button
-                  :disabled="isActionBusy"
-                  @click="withAction('reload_pipelines', reloadPipelines)"
-                >
+                <button :disabled="isActionBusy" @click="withAction('reload_pipelines', reloadPipelines)">
                   Reload
                 </button>
               </div>
@@ -1353,21 +1273,13 @@ onBeforeUnmount(() => {
                 </span>
                 <span>Step</span>
               </button>
-              <button
-                :disabled="!canStep"
-                title="Step stage"
-                @click="runDebuggerCommand('step_over_stage')"
-              >
+              <button :disabled="!canStep" title="Step stage" @click="runDebuggerCommand('step_over_stage')">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.stepStage }}
                 </span>
                 <span>Step Stage</span>
               </button>
-              <button
-                :disabled="!canStep"
-                title="Step pipeline"
-                @click="runDebuggerCommand('step_over_pipeline')"
-              >
+              <button :disabled="!canStep" title="Step pipeline" @click="runDebuggerCommand('step_over_pipeline')">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.stepPipeline }}
                 </span>
@@ -1381,31 +1293,20 @@ onBeforeUnmount(() => {
                   <option value="">None</option>
                   <template v-for="pipeline in pipelines" :key="pipeline.id">
                     <option :value="`${pipeline.id}:`">{{ pipeline.id }}</option>
-                    <option
-                      v-for="stage in pipeline.stages"
-                      :key="`${pipeline.id}:${stage.id}`"
-                      :value="`${pipeline.id}:${stage.id}`"
-                    >
+                    <option v-for="stage in pipeline.stages" :key="`${pipeline.id}:${stage.id}`"
+                      :value="`${pipeline.id}:${stage.id}`">
                       {{ pipeline.id }} / {{ stage.id }}
                     </option>
                   </template>
                 </select>
               </label>
-              <button
-                :disabled="!canSetBreakpoint"
-                title="Set breakpoint"
-                @click="toggleBreakpoint(true)"
-              >
+              <button :disabled="!canSetBreakpoint" title="Set breakpoint" @click="toggleBreakpoint(true)">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.breakpoint }}
                 </span>
                 <span>Set</span>
               </button>
-              <button
-                :disabled="!canSetBreakpoint"
-                title="Clear breakpoint"
-                @click="toggleBreakpoint(false)"
-              >
+              <button :disabled="!canSetBreakpoint" title="Clear breakpoint" @click="toggleBreakpoint(false)">
                 <span class="material-symbols-outlined" aria-hidden="true">
                   {{ materialIcons.clearBreakpoint }}
                 </span>
@@ -1416,9 +1317,7 @@ onBeforeUnmount(() => {
 
           <header class="statusbar">
             <button @click="showPipelineIndex">Pipelines</button>
-            <span v-if="hasPipelineIntegrityProblem"
-              >Debugging blocked: pipeline integrity problem</span
-            >
+            <span v-if="hasPipelineIntegrityProblem">Debugging blocked: pipeline integrity problem</span>
             <span v-else>Status: {{ debugState.status }}</span>
             <span>Step {{ debugState.cursor ?? 0 }} / {{ debugState.total_steps ?? 0 }}</span>
           </header>
@@ -1426,26 +1325,16 @@ onBeforeUnmount(() => {
           <section class="stage-preview" aria-label="Stage image preview">
             <header class="stage-preview-header">
               <strong>Stage Preview</strong>
-              <span
-                >{{ stagePreviewRecord?.pipeline_id }} / {{ stagePreviewRecord?.stage_id }}</span
-              >
+              <span>{{ stagePreviewRecord?.pipeline_id }} / {{ stagePreviewRecord?.stage_id }}</span>
             </header>
             <div class="stage-preview-grid">
-              <article
-                class="stage-preview-pane"
-                :class="{ expanded: expandedPreview === 'input' }"
-              >
+              <article class="stage-preview-pane" :class="{ expanded: expandedPreview === 'input' }">
                 <header>
                   <strong>Entering Stage</strong>
-                  <button
-                    :disabled="!stagePreviewRecord?.input_preview"
-                    :title="
-                      expandedPreview === 'input'
-                        ? 'Collapse input preview'
-                        : 'Expand input preview'
-                    "
-                    @click="togglePreviewExpansion('input')"
-                  >
+                  <button :disabled="!stagePreviewRecord?.input_preview" :title="expandedPreview === 'input'
+                    ? 'Collapse input preview'
+                    : 'Expand input preview'
+                    " @click="togglePreviewExpansion('input')">
                     <span class="material-symbols-outlined" aria-hidden="true">
                       {{
                         expandedPreview === 'input' ? materialIcons.collapse : materialIcons.expand
@@ -1454,62 +1343,26 @@ onBeforeUnmount(() => {
                   </button>
                 </header>
                 <div class="preview-surface">
-                  <div
-                    v-if="stagePreviewRecord?.input_preview"
-                    class="mask-preview-frame"
-                    :class="{ editable: canDraftMask }"
-                  >
-                    <img
-                      ref="maskPreviewImage"
-                      :src="stagePreviewRecord.input_preview"
-                      alt="Stage input preview"
-                      @click="handleMaskPreviewClick"
-                      @dblclick="handleMaskPreviewDoubleClick"
-                    />
-                    <svg
-                      v-if="maskFrameWidth > 0 && maskFrameHeight > 0"
-                      class="mask-overlay"
-                      :viewBox="`0 0 ${maskFrameWidth} ${maskFrameHeight}`"
-                      preserveAspectRatio="none"
-                      aria-hidden="true"
-                    >
-                      <polygon
-                        v-for="(polygon, index) in maskPolygons"
-                        :key="`mask-${index}`"
-                        :points="maskPolygonPoints(polygon)"
-                        class="mask-polygon"
-                      />
-                      <template
-                        v-for="(polygon, polygonIndex) in maskPolygons"
-                        :key="`points-${polygonIndex}`"
-                      >
-                        <circle
-                          v-for="(point, pointIndex) in polygon"
-                          :key="`point-${polygonIndex}-${pointIndex}`"
-                          :cx="point.x"
-                          :cy="point.y"
-                          :r="Math.max(3, Math.round(maskFrameWidth / 160))"
-                          class="mask-polygon-point"
-                        />
+                  <div v-if="stagePreviewRecord?.input_preview" class="mask-preview-frame"
+                    :class="{ editable: canDraftMask }">
+                    <img ref="maskPreviewImage" :src="stagePreviewRecord.input_preview" alt="Stage input preview"
+                      @click="handleMaskPreviewClick" @dblclick="handleMaskPreviewDoubleClick" />
+                    <svg v-if="maskFrameWidth > 0 && maskFrameHeight > 0" class="mask-overlay"
+                      :viewBox="`0 0 ${maskFrameWidth} ${maskFrameHeight}`" preserveAspectRatio="none"
+                      aria-hidden="true">
+                      <polygon v-for="(polygon, index) in maskPolygons" :key="`mask-${index}`"
+                        :points="maskPolygonPoints(polygon)" class="mask-polygon" />
+                      <template v-for="(polygon, polygonIndex) in maskPolygons" :key="`points-${polygonIndex}`">
+                        <circle v-for="(point, pointIndex) in polygon" :key="`point-${polygonIndex}-${pointIndex}`"
+                          :cx="point.x" :cy="point.y" :r="Math.max(3, Math.round(maskFrameWidth / 160))"
+                          class="mask-polygon-point" />
                       </template>
-                      <polygon
-                        v-if="hasMaskDraftArea"
-                        :points="maskPolygonPoints(maskDraftPolygon)"
-                        class="mask-draft-polygon"
-                      />
-                      <polyline
-                        v-if="maskDraftPolygon.length > 0"
-                        :points="maskPolygonPoints(maskDraftPolygon)"
-                        class="mask-draft-line"
-                      />
-                      <circle
-                        v-for="(point, index) in maskDraftPolygon"
-                        :key="`draft-${index}`"
-                        :cx="point.x"
-                        :cy="point.y"
-                        :r="Math.max(3, Math.round(maskFrameWidth / 160))"
-                        class="mask-draft-point"
-                      />
+                      <polygon v-if="hasMaskDraftArea" :points="maskPolygonPoints(maskDraftPolygon)"
+                        class="mask-draft-polygon" />
+                      <polyline v-if="maskDraftPolygon.length > 0" :points="maskPolygonPoints(maskDraftPolygon)"
+                        class="mask-draft-line" />
+                      <circle v-for="(point, index) in maskDraftPolygon" :key="`draft-${index}`" :cx="point.x"
+                        :cy="point.y" :r="Math.max(3, Math.round(maskFrameWidth / 160))" class="mask-draft-point" />
                     </svg>
                   </div>
                   <span v-else>No input preview available</span>
@@ -1519,21 +1372,13 @@ onBeforeUnmount(() => {
                 </div>
               </article>
 
-              <article
-                class="stage-preview-pane"
-                :class="{ expanded: expandedPreview === 'output' }"
-              >
+              <article class="stage-preview-pane" :class="{ expanded: expandedPreview === 'output' }">
                 <header>
                   <strong>Exiting Stage</strong>
-                  <button
-                    :disabled="!stagePreviewRecord?.output_preview"
-                    :title="
-                      expandedPreview === 'output'
-                        ? 'Collapse output preview'
-                        : 'Expand output preview'
-                    "
-                    @click="togglePreviewExpansion('output')"
-                  >
+                  <button :disabled="!stagePreviewRecord?.output_preview" :title="expandedPreview === 'output'
+                    ? 'Collapse output preview'
+                    : 'Expand output preview'
+                    " @click="togglePreviewExpansion('output')">
                     <span class="material-symbols-outlined" aria-hidden="true">
                       {{
                         expandedPreview === 'output' ? materialIcons.collapse : materialIcons.expand
@@ -1542,11 +1387,8 @@ onBeforeUnmount(() => {
                   </button>
                 </header>
                 <div class="preview-surface">
-                  <img
-                    v-if="stagePreviewRecord?.output_preview"
-                    :src="stagePreviewRecord.output_preview"
-                    alt="Stage output preview"
-                  />
+                  <img v-if="stagePreviewRecord?.output_preview" :src="stagePreviewRecord.output_preview"
+                    alt="Stage output preview" />
                   <span v-else>No output preview available</span>
                   <footer>
                     <span>Output {{ stagePreviewRecord?.output_shape ?? [] }}</span>
@@ -1562,15 +1404,9 @@ onBeforeUnmount(() => {
                 <strong>{{ pipeline.name || pipeline.id }}</strong>
                 <span>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</span>
               </header>
-              <button
-                v-for="stage in pipeline.stages"
-                :key="stage.id"
-                class="stage-row"
-                :class="{
-                  selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId,
-                }"
-                @click="selectStageInPipeline(pipeline.id, stage.id)"
-              >
+              <button v-for="stage in pipeline.stages" :key="stage.id" class="stage-row" :class="{
+                selected: pipeline.id === selectedPipelineId && stage.id === selectedStageId,
+              }" @click="selectStageInPipeline(pipeline.id, stage.id)">
                 <span>{{ stage.id }}</span>
                 <small>{{ stageSummary(stage) }}</small>
               </button>
@@ -1581,22 +1417,16 @@ onBeforeUnmount(() => {
             <header class="editor-header">
               <strong>Pipeline Configuration</strong>
               <div class="editor-actions">
-                <button
-                  :disabled="!canEditPipelines"
-                  @click="withAction('reload_pipelines', loadPipelineConfigPipelines)"
-                >
+                <button :disabled="!canEditPipelines"
+                  @click="withAction('reload_pipelines', loadPipelineConfigPipelines)">
                   Reload Pipelines
                 </button>
-                <button
-                  :disabled="!canEditPipelines"
-                  @click="withAction('save_pipelines', savePipelineConfigPipelines)"
-                >
+                <button :disabled="!canEditPipelines"
+                  @click="withAction('save_pipelines', savePipelineConfigPipelines)">
                   Save Pipelines
                 </button>
-                <button
-                  :disabled="!canEditPipelines"
-                  @click="withAction('deploy_pipelines', deployPipelineConfigPipelines)"
-                >
+                <button :disabled="!canEditPipelines"
+                  @click="withAction('deploy_pipelines', deployPipelineConfigPipelines)">
                   Deploy
                 </button>
               </div>
@@ -1614,19 +1444,10 @@ onBeforeUnmount(() => {
                 </label>
                 <label class="field light">
                   <span>Frame interval seconds</span>
-                  <input
-                    v-model="pipelineConfigFrameIntervalSeconds"
-                    type="text"
-                    inputmode="decimal"
-                  />
+                  <input v-model="pipelineConfigFrameIntervalSeconds" type="text" inputmode="decimal" />
                 </label>
-                <button
-                  v-for="pipeline in pipelineConfigPipelines"
-                  :key="pipeline.id"
-                  class="stage-row"
-                  :class="{ selected: pipeline.id === selectedPipelineId }"
-                  @click="selectPipeline(pipeline.id)"
-                >
+                <button v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" class="stage-row"
+                  :class="{ selected: pipeline.id === selectedPipelineId }" @click="selectPipeline(pipeline.id)">
                   <span>{{ pipeline.id }}</span>
                   <small>{{ pipeline.enabled ? 'enabled' : 'disabled' }}</small>
                 </button>
@@ -1649,11 +1470,7 @@ onBeforeUnmount(() => {
                 </label>
                 <label class="inline-field">
                   <span>Enabled</span>
-                  <input
-                    v-if="selectedPipelinesPipeline"
-                    v-model="selectedPipelinesPipeline.enabled"
-                    type="checkbox"
-                  />
+                  <input v-if="selectedPipelinesPipeline" v-model="selectedPipelinesPipeline.enabled" type="checkbox" />
                 </label>
                 <button :disabled="!canApplyPipeline" @click="applyPipelineEdits">
                   Apply Pipeline
@@ -1665,13 +1482,8 @@ onBeforeUnmount(() => {
                     <button :disabled="!canApplyPipeline" @click="addStage">Add</button>
                   </div>
                 </header>
-                <button
-                  v-for="stage in selectedPipelinesPipeline?.stages ?? []"
-                  :key="stage.id"
-                  class="stage-row"
-                  :class="{ selected: stage.id === selectedStageId }"
-                  @click="selectStage(stage.id)"
-                >
+                <button v-for="stage in selectedPipelinesPipeline?.stages ?? []" :key="stage.id" class="stage-row"
+                  :class="{ selected: stage.id === selectedStageId }" @click="selectStage(stage.id)">
                   <span>{{ stage.id }}</span>
                   <small>{{ stageSummary(stage) }}</small>
                 </button>
@@ -1688,11 +1500,7 @@ onBeforeUnmount(() => {
                 </label>
                 <label class="inline-field">
                   <span>Enabled</span>
-                  <input
-                    v-if="selectedPipelinesStage"
-                    v-model="selectedPipelinesStage.enabled"
-                    type="checkbox"
-                  />
+                  <input v-if="selectedPipelinesStage" v-model="selectedPipelinesStage.enabled" type="checkbox" />
                 </label>
                 <label class="field light">
                   <span>Filename</span>
@@ -1702,11 +1510,7 @@ onBeforeUnmount(() => {
                   <span>Pipeline reference</span>
                   <select v-model="selectedStagePipeline">
                     <option value=""></option>
-                    <option
-                      v-for="pipeline in pipelineConfigPipelines"
-                      :key="pipeline.id"
-                      :value="pipeline.id"
-                    >
+                    <option v-for="pipeline in pipelineConfigPipelines" :key="pipeline.id" :value="pipeline.id">
                       {{ pipeline.id }}
                     </option>
                   </select>
@@ -1727,22 +1531,13 @@ onBeforeUnmount(() => {
                   <button :disabled="!canDraftMask || !hasMaskDraftArea" @click="closeMaskPolygon">
                     Close Polygon
                   </button>
-                  <button
-                    :disabled="!canDraftMask || maskDraftPolygon.length === 0"
-                    @click="undoMaskPoint"
-                  >
+                  <button :disabled="!canDraftMask || maskDraftPolygon.length === 0" @click="undoMaskPoint">
                     Undo Point
                   </button>
-                  <button
-                    :disabled="!canDraftMask || maskDraftPolygon.length === 0"
-                    @click="clearMaskDraft"
-                  >
+                  <button :disabled="!canDraftMask || maskDraftPolygon.length === 0" @click="clearMaskDraft">
                     Clear Draft
                   </button>
-                  <button
-                    :disabled="!canApplyStage || maskPolygons.length === 0"
-                    @click="clearMaskPolygons"
-                  >
+                  <button :disabled="!canApplyStage || maskPolygons.length === 0" @click="clearMaskPolygons">
                     Clear Masks
                   </button>
                 </div>
@@ -2489,7 +2284,7 @@ button:disabled .material-symbols-outlined {
   color: #f7fafc;
 }
 
-.vscode-header > div:first-child {
+.vscode-header>div:first-child {
   display: grid;
   gap: 2px;
 }
@@ -2668,6 +2463,7 @@ button:disabled .material-symbols-outlined {
 }
 
 @media (max-width: 820px) {
+
   .app-layout,
   .shell,
   .details,
