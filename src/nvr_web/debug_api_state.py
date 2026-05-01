@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import inspect
+import json
 from math import isfinite
 from pathlib import Path
 import re
@@ -37,6 +38,8 @@ class DebugApiState:
         self.pipelines_store = PipelinesStore(self.config, logger=self.logger)
         self.debug_uploads_dir = self.pipelines_store.storage_path / "debug_uploads"
         self.debug_uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.app_config_path = self.pipelines_store.storage_path / "app_config.json"
+        self._load_app_config()
 
     def list_cameras(self) -> list[dict[str, Any]]:
         cameras = []
@@ -124,6 +127,13 @@ class DebugApiState:
         self.close_frame_sources()
         return self.pipelines(None)
 
+    def app_config(self) -> dict[str, Any]:
+        return {
+            "debug_source_file": self._debug_source_public_response(
+                self._last_debug_source_file()
+            )
+        }
+
     def save_debug_source_file(self, filename: str, source: Any) -> dict[str, Any]:
         safe_filename = self._safe_debug_source_filename(filename)
         source_id = uuid.uuid4().hex
@@ -138,11 +148,8 @@ class DebugApiState:
             "frame_interval_seconds": frame_interval_seconds,
         }
         self.debug_source_files[source_id] = debug_source
-        return {
-            "id": source_id,
-            "name": safe_filename,
-            "frame_interval_seconds": frame_interval_seconds,
-        }
+        self._write_app_config({"debug_source_file": debug_source})
+        return self._debug_source_public_response(debug_source) or {}
 
     def log_entries(self, limit: int = 500) -> list[dict[str, Any]]:
         return LogReader(Logger().log_file_path).entries(limit)
@@ -173,6 +180,11 @@ class DebugApiState:
     def reload_config(self) -> None:
         self.config = Config()
         self.pipelines_store = PipelinesStore(self.config, logger=self.logger)
+        self.debug_uploads_dir = self.pipelines_store.storage_path / "debug_uploads"
+        self.debug_uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.app_config_path = self.pipelines_store.storage_path / "app_config.json"
+        self.debug_source_files.clear()
+        self._load_app_config()
         self.sessions.clear()
         self.close_frame_sources()
 
@@ -292,6 +304,86 @@ class DebugApiState:
         if debug_source is None:
             return None
         return f"file:{debug_source['name']}"
+
+    def _load_app_config(self) -> None:
+        if not self.app_config_path.exists():
+            return
+        try:
+            data = json.loads(self.app_config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(data, dict):
+            return
+        debug_source = self._normalize_debug_source_file(
+            data.get("debug_source_file")
+        )
+        if debug_source is None:
+            return
+        self.debug_source_files[debug_source["id"]] = debug_source
+
+    def _write_app_config(self, data: dict[str, Any]) -> None:
+        self.app_config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.app_config_path.write_text(
+            json.dumps(data, indent=2, sort_keys=True), encoding="utf-8"
+        )
+
+    def _last_debug_source_file(self) -> dict[str, Any] | None:
+        if not self.app_config_path.exists():
+            return None
+        try:
+            data = json.loads(self.app_config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return self._normalize_debug_source_file(data.get("debug_source_file"))
+
+    def _normalize_debug_source_file(self, value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        source_id = value.get("id")
+        name = value.get("name")
+        path = value.get("path")
+        if not isinstance(source_id, str) or not source_id:
+            return None
+        if not isinstance(name, str) or not name:
+            return None
+        if not isinstance(path, str) or not path:
+            return None
+        source_path = Path(path)
+        try:
+            source_path.resolve().relative_to(self.debug_uploads_dir.resolve())
+        except ValueError:
+            return None
+        if source_path.suffix.lower() != ".mp4" or not source_path.is_file():
+            return None
+        frame_interval_seconds = value.get("frame_interval_seconds")
+        if (
+            not isinstance(frame_interval_seconds, (int, float))
+            or not isfinite(float(frame_interval_seconds))
+            or frame_interval_seconds < 0
+        ):
+            frame_interval_seconds = self._debug_source_frame_interval_seconds(
+                source_path
+            )
+        return {
+            "id": source_id,
+            "name": name,
+            "path": str(source_path),
+            "frame_interval_seconds": float(frame_interval_seconds),
+        }
+
+    @staticmethod
+    def _debug_source_public_response(
+        debug_source: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if debug_source is None:
+            return None
+        return {
+            "id": debug_source["id"],
+            "name": debug_source["name"],
+            "frame_interval_seconds": debug_source["frame_interval_seconds"],
+        }
 
     @staticmethod
     def _safe_debug_source_filename(filename: str) -> str:

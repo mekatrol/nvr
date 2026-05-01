@@ -231,6 +231,7 @@ export const useNvrAppState = () => {
         startLogRefresh()
       }
       loadCameras()
+        .then(loadAppConfig)
         .then(refreshCamera)
         .catch(() => undefined)
     })
@@ -270,6 +271,17 @@ const loadCameras = async (): Promise<void> => {
     throw error
   } finally {
     isLoadingCameras.value = false
+  }
+}
+
+const loadAppConfig = async (): Promise<void> => {
+  try {
+    const appConfig = await nvrApi.getAppConfig()
+    if (!appConfig.debug_source_file) return
+    selectedDebugSourceFile.value = appConfig.debug_source_file
+    selectedCameraId.value = DEBUG_FILE_CAMERA_ID
+  } catch {
+    return
   }
 }
 

@@ -11,6 +11,10 @@ export type DebugSourceFile = {
   frame_interval_seconds: number | null
 }
 
+export type AppConfig = {
+  debug_source_file: DebugSourceFile | null
+}
+
 export type Stage = {
   id: string
   enabled: boolean

@@ -46,6 +46,9 @@ class DebugApiHandler(SimpleHTTPRequestHandler):
             limit = self._query_int(query, "limit", 500)
             self._json({"entries": api_state.log_entries(limit)})
             return
+        if parsed.path == "/api/app/config":
+            self._json(api_state.app_config())
+            return
         if parsed.path == "/api/debug/state":
             camera_id = self._query_value(query, "camera_id")
             pipeline_config_path = self._query_value(query, "pipeline_config_path")

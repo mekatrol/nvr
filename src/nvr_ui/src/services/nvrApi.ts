@@ -1,5 +1,6 @@
 import { getJson, postForm, postJson } from './apiClient'
 import type {
+  AppConfig,
   Camera,
   DebugSourceFile,
   DebugState,
@@ -18,6 +19,10 @@ export const nvrApi = {
   getCameras: async (): Promise<Camera[]> => {
     const payload = await getJson<{ cameras: Camera[] }>('/api/cameras')
     return payload.cameras
+  },
+
+  getAppConfig: (): Promise<AppConfig> => {
+    return getJson<AppConfig>('/api/app/config')
   },
 
   getPipelines: (cameraId: string, pipelineConfigPath: string): Promise<PipelineGraphResponse> => {

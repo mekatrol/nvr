@@ -1,3 +1,4 @@
+from io import BytesIO
 import json
 import tempfile
 import unittest
@@ -205,6 +206,42 @@ class DebugApiTest(unittest.TestCase):
             self.assertTrue((temp_path / "pipeline_config").is_dir())
             self.assertTrue((temp_path / "pipeline_config" / "pipelines").is_dir())
             self.assertTrue((temp_path / "pipeline_config" / "deployed").is_dir())
+
+    def test_uploaded_debug_source_file_is_restored_from_app_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            with patch.object(
+                DebugApiState, "_debug_source_frame_interval_seconds", return_value=0.04
+            ):
+                uploaded = DebugApiState(config, FakeFrameSource).save_debug_source_file(
+                    "sample clip.mp4", BytesIO(b"not a real mp4")
+                )
+
+            restored_state = DebugApiState(config, FakeFrameSource)
+            restored = restored_state.app_config()["debug_source_file"]
+
+            self.assertEqual(uploaded, restored)
+            self.assertIn(uploaded["id"], restored_state.debug_source_files)
+            self.assertEqual("sample_clip.mp4", restored["name"])
+
+    def test_http_api_returns_last_uploaded_debug_source_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            state = DebugApiState(config, FakeFrameSource)
+            with patch.object(
+                DebugApiState, "_debug_source_frame_interval_seconds", return_value=0.04
+            ):
+                uploaded = state.save_debug_source_file(
+                    "debug-source.mp4", BytesIO(b"not a real mp4")
+                )
+            TestableDebugApiHandler.api_state = state
+
+            handler = TestableDebugApiHandler("/api/app/config")
+            handler.do_GET()
+            response = json.loads(handler.wfile.getvalue().decode("utf-8"))
+
+            self.assertEqual(200, handler.status)
+            self.assertEqual(uploaded, response["debug_source_file"])
 
     def test_pipeline_config_save_does_not_modify_deployed_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
